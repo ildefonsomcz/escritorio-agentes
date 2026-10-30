@@ -1,72 +1,51 @@
-# Habblaud no Docker local.
+# Escritório dos Agentes (F2J) — roda na mesma máquina do n8n.
 #
-# Suba com `npm run docker:up`: o script detecta as contas do Claude Code no host e gera o
-# docker-compose.override.yml (fora do controle de versão) com:
-#   - montagens SOMENTE LEITURA de <conta>/projects e <conta>/sessions em /claude/<conta>/...
-#     (nunca a pasta inteira da conta: lá ficam credenciais e configurações) e de ~/.habblaud/usage
-#     (uso de 5h/semanal capturado pelo tap de statusline) em /usage;
-#   - do Codex, SOMENTE <pasta>/sessions, <pasta>/archived_sessions e <pasta>/thread-writer-locks em
-#     /codex/<conta>/... (nunca auth.json, config.toml, history.jsonl, logs nem os bancos SQLite);
-#   - HABBLAUD_CLAUDE_DIRS, HABBLAUD_CODEX_DIRS, HABBLAUD_ACCOUNTS e HABBLAUD_USAGE_DIR.
-# O Compose mescla o override automaticamente em qualquer `docker compose ...` rodado nesta pasta.
-name: habblaud
+#   1. cp .env.exemplo .env   e preencha (URL e chave do Supabase do Cérebro, usuário e hash da senha)
+#   2. node scripts/gerar-senha.mjs        gera o HABBLAUD_REMOTE_PASSWORD_HASH para o .env
+#   3. docker compose up -d --build
+#   4. no proxy do servidor (o mesmo do n8n), aponte o subdomínio para 127.0.0.1:4748 (veja INSTALAR-NO-SERVIDOR.md)
+#
+# Duas portas, as duas presas ao 127.0.0.1 do servidor (nada fica aberto direto para a internet):
+#   4747  sem login, só para quem já está dentro do servidor (teste rápido com curl / túnel SSH)
+#   4748  com login (usuário e senha do .env): é esta que o proxy publica com HTTPS
+name: escritorio-agentes
 
 services:
-  habblaud:
+  escritorio:
     build: .
-    image: habblaud:local
-    container_name: habblaud
+    image: escritorio-agentes:local
+    container_name: escritorio-agentes
     restart: unless-stopped
-    # Os transcripts são sensíveis: por padrão a porta é publicada SÓ na interface local do host
-    # (HABBLAUD_BIND=0.0.0.0 no .env libera a rede local; veja o README).
     ports:
-      - "${HABBLAUD_BIND:-127.0.0.1}:${HABBLAUD_PORT:-4747}:4747"
-      # A porta do acesso pelo celular (com login) só é publicada depois do npm run remote:setup: quem a junta é o
-      # docker-compose.override.yml que o docker:up gera.
+      - "127.0.0.1:${ESCRITORIO_PORTA_LOCAL:-4747}:4747"
+      - "127.0.0.1:${ESCRITORIO_PORTA:-4748}:4748"
     volumes:
-      - habblaud-data:/data
-    # Opções que podem vir do .env (ou do ambiente) para dentro do container.
+      - escritorio-data:/data
     environment:
-      HABBLAUD_ALLOWED_HOSTS: ${HABBLAUD_ALLOWED_HOSTS:-}
-      HABBLAUD_DEMO: ${HABBLAUD_DEMO:-}
-      # O mesmo valor da porta publicada acima: o terminal (e o que age sobre as sessões) só liga com bind local.
-      HABBLAUD_BIND: ${HABBLAUD_BIND:-127.0.0.1}
-      HABBLAUD_TERMINAL: ${HABBLAUD_TERMINAL:-}
-      # 0 desliga as mensagens pelo escritório (mandar mensagens aos agentes pela página e pelo terminal).
-      HABBLAUD_MENSAGENS: ${HABBLAUD_MENSAGENS:-}
-      # 0 desliga a verificação de versão nova (consulta às releases no GitHub a cada 6 h).
-      HABBLAUD_UPDATE_CHECK: ${HABBLAUD_UPDATE_CHECK:-}
-      HABBLAUD_LANG: ${HABBLAUD_LANG:-}
-      # 0 desliga as sessões do Codex no escritório.
-      HABBLAUD_CODEX: ${HABBLAUD_CODEX:-}
-      # 1 liga o Novo agente pelo escritório (no Docker, quem começa a sessão é o auxiliar do host, npm run
-      # codex:bridge; o terminal interativo em si não roda no container).
-      HABBLAUD_PTY: ${HABBLAUD_PTY:-}
-      # Acesso remoto com login (server/http/remote.ts).
-      HABBLAUD_REMOTE_USER: ${HABBLAUD_REMOTE_USER:-}
-      HABBLAUD_REMOTE_PASSWORD_HASH: ${HABBLAUD_REMOTE_PASSWORD_HASH:-}
-      HABBLAUD_REMOTE_ALLOW: ${HABBLAUD_REMOTE_ALLOW:-}
-      HABBLAUD_REMOTE_INSECURE_HTTP: ${HABBLAUD_REMOTE_INSECURE_HTTP:-}
-      # Habblaud World (ligado por padrão: server.habblaud.com; nada sai antes de criar a conta). HABBLAUD_WORLD=0 desliga tudo.
-      HABBLAUD_WORLD: ${HABBLAUD_WORLD:-}
-      HABBLAUD_WORLD_URL: ${HABBLAUD_WORLD_URL:-}
-      HABBLAUD_WORLD_DEV: ${HABBLAUD_WORLD_DEV:-}
-    # O host visto de dentro do container (servidor do Habblaud World local em teste: HABBLAUD_WORLD_URL=
-    # http://host.docker.internal:<porta> com HABBLAUD_WORLD_DEV=1). No Docker Desktop o nome já existe; no Linux,
-    # host-gateway o aponta para o host. Inofensivo sem o World.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    # Endurecimento: sistema de arquivos só leitura (exceto /data e /tmp), sem capabilities extras.
+      TZ: ${TZ:-America/Maceio}
+      HABBLAUD_SOURCE: cerebro
+      CEREBRO_SUPABASE_URL: ${CEREBRO_SUPABASE_URL:?defina CEREBRO_SUPABASE_URL no .env}
+      CEREBRO_SUPABASE_KEY: ${CEREBRO_SUPABASE_KEY:?defina CEREBRO_SUPABASE_KEY no .env}
+      CEREBRO_POLL_MS: ${CEREBRO_POLL_MS:-3000}
+      CEREBRO_TIMEOUT_MIN: ${CEREBRO_TIMEOUT_MIN:-5}
+      # nome público (subdomínio) aceito no cabeçalho Host
+      HABBLAUD_ALLOWED_HOSTS: ${ESCRITORIO_DOMINIO:-}
+      # login da porta 4748; o HTTPS fica com o proxy do servidor
+      HABBLAUD_REMOTE_USER: ${HABBLAUD_REMOTE_USER:?defina HABBLAUD_REMOTE_USER no .env}
+      HABBLAUD_REMOTE_PASSWORD_HASH: ${HABBLAUD_REMOTE_PASSWORD_HASH:?gere com node scripts/gerar-senha.mjs}
+      HABBLAUD_REMOTE_INSECURE_HTTP: "1"
+      HABBLAUD_REMOTE_ALLOW: none
+      HABBLAUD_WORLD: "0"
+      HABBLAUD_UPDATE_CHECK: "0"
+      HABBLAUD_CODEX: "0"
     read_only: true
-    # /tmp em memória, com teto: sem `size` o Docker deixa usar metade da RAM do host.
     tmpfs:
       - /tmp:size=64m
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
-    # Processo init mínimo: repassa sinais e recolhe processos órfãos.
     init: true
 
 volumes:
-  habblaud-data:
+  escritorio-data:

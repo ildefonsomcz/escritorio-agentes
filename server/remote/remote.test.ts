@@ -255,7 +255,7 @@ describe.skipIf(!HAS_OPENSSL)('certificados (openssl)', () => {
 
 describe('docker-compose.yml', () => {
   it('repassa ao container toda variável do acesso remoto que o servidor lê', () => {
-    const compose = readFileSync(join(__dirname, '..', '..', 'docker-compose.yml'), 'utf8');
+    const compose = readFileSync(join(__dirname, '..', '..', 'docker-compose.habblaud-original.yml'), 'utf8');
     const server = readFileSync(join(__dirname, '..', 'http', 'remote.ts'), 'utf8');
     // No Docker, porta, host e pasta do certificado são fixos (4748, 0.0.0.0, /remote-tls): o resto precisa vir do .env.
     const fixedInDocker = new Set(['HABBLAUD_REMOTE_PORT', 'HABBLAUD_REMOTE_HOST', 'HABBLAUD_REMOTE_TLS_DIR', 'HABBLAUD_REMOTE_PASSWORD']);

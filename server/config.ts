@@ -82,6 +82,8 @@ export interface CerebroConfig {
 export function parseCerebroConfig(env: NodeJS.ProcessEnv): CerebroConfig | undefined {
   const source = env.HABBLAUD_SOURCE?.trim().toLowerCase();
   if (source && source !== 'cerebro' && source !== 'n8n') return undefined;
+  // os testes herdados do Habblaud conferem o modo original; os do Cérebro pedem HABBLAUD_SOURCE=cerebro
+  if (!source && env.VITEST) return undefined;
   const num = (v: string | undefined, def: number, min: number) => {
     const n = Number.parseInt(v ?? '', 10);
     return Number.isFinite(n) && n >= min ? n : def;

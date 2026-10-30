@@ -1,10 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# Habblaud em container: escritório virtual dos agentes do Claude Code.
-#
-# Use `npm run docker:up` (scripts/docker-up.ts): ele detecta as contas do Claude Code no host,
-# gera o docker-compose.override.yml com as montagens SOMENTE LEITURA de <conta>/projects,
-# <conta>/sessions e ~/.habblaud/usage e sobe o serviço. Este Dockerfile sozinho não monta nada do host.
+# Escritório dos Agentes (F2J), baseado no Habblaud: os agentes do n8n em pixel art, lidos do banco do Cérebro.
+# Suba com `docker compose up -d --build` (docker-compose.yml e INSTALAR-NO-SERVIDOR.md). Nada do host é montado.
 
 # ---------------------------------------------------------------------------------------------
 # Estágio 1: compila o cliente (Vite) e empacota o servidor (esbuild) em dist/.
@@ -39,6 +36,9 @@ WORKDIR /app
 
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/dist ./dist
+
+# Fuso horário (os números do dia zeram à meia-noite local; TZ vem do docker-compose.yml).
+RUN apk add --no-cache tzdata
 
 # Estado do Habblaud (nomes persistidos). O volume nomeado herda este dono na primeira montagem.
 RUN mkdir -p /data && chown node:node /data

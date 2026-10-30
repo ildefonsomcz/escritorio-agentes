@@ -120,7 +120,7 @@ describe('trava das mensagens (config)', () => {
   it('loadConfig preenche ServerConfig.messages', () => {
     const tmp = tempDir();
     try {
-      const cfg = (env: NodeJS.ProcessEnv) => loadConfig({ HOME: tmp.dir, HABBLAUD_IN_DOCKER: '0', ...env }, []);
+      const cfg = (env: NodeJS.ProcessEnv) => loadConfig({ HOME: tmp.dir, HABBLAUD_IN_DOCKER: '0', HABBLAUD_SOURCE: 'claude', ...env }, []);
       expect(cfg({})).toMatchObject({ terminal: true, messages: true });
       expect(cfg({ HABBLAUD_MENSAGENS: '0' })).toMatchObject({ terminal: true, messages: false });
       expect(cfg({ HABBLAUD_TERMINAL: '0' })).toMatchObject({ terminal: false, messages: false });

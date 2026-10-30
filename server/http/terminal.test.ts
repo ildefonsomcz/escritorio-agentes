@@ -63,7 +63,7 @@ describe('trava do terminal (config)', () => {
   it('loadConfig preenche ServerConfig.terminal', () => {
     const tmp = tempDir();
     try {
-      const terminal = (env: NodeJS.ProcessEnv) => loadConfig({ HOME: tmp.dir, HABBLAUD_IN_DOCKER: '0', ...env }, []).terminal;
+      const terminal = (env: NodeJS.ProcessEnv) => loadConfig({ HOME: tmp.dir, HABBLAUD_IN_DOCKER: '0', HABBLAUD_SOURCE: 'claude', ...env }, []).terminal;
       expect(terminal({})).toBe(true);
       expect(terminal({ HABBLAUD_HOST: '0.0.0.0' })).toBe(false);
       expect(terminal({ HABBLAUD_TERMINAL: '0' })).toBe(false);

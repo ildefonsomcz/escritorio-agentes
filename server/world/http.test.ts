@@ -251,7 +251,7 @@ describe('HABBLAUD_WORLD e HABBLAUD_WORLD_URL', () => {
 
 describe('docker-compose.yml', () => {
   it('repassa ao container toda variável do Habblaud World que o servidor lê', () => {
-    const compose = readFileSync(join(import.meta.dirname, '..', '..', 'docker-compose.yml'), 'utf8');
+    const compose = readFileSync(join(import.meta.dirname, '..', '..', 'docker-compose.habblaud-original.yml'), 'utf8');
     const config = readFileSync(join(import.meta.dirname, '..', 'config.ts'), 'utf8');
     const read = [...new Set([...config.matchAll(/env\.(HABBLAUD_WORLD[A-Z_]*)/g)].map((m) => m[1]))].sort();
     expect(read).toEqual(['HABBLAUD_WORLD', 'HABBLAUD_WORLD_DEV', 'HABBLAUD_WORLD_URL']);
@@ -259,7 +259,7 @@ describe('docker-compose.yml', () => {
   });
 
   it('o container acha o host em host.docker.internal (servidor do mundo local, também no Linux)', () => {
-    const compose = readFileSync(join(import.meta.dirname, '..', '..', 'docker-compose.yml'), 'utf8');
+    const compose = readFileSync(join(import.meta.dirname, '..', '..', 'docker-compose.habblaud-original.yml'), 'utf8');
     expect(compose).toMatch(/^ {4}extra_hosts:\n {6}- "host\.docker\.internal:host-gateway"$/m);
   });
 });

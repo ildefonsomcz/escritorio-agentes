@@ -36,7 +36,7 @@ describe('Meu dia com o Codex', () => {
       (id) => id === '.codex',
     );
     expect(cards.map((c) => [c.id, c.codex, c.cost, c.tokens])).toEqual([
-      ['.claude', false, 'US$ 1,50', '10'],
+      ['.claude', false, 'R$ 1,50', '10'],
       ['.codex', true, null, '2 M'],
     ]);
     // Sem a função, ninguém é do Codex (como antes).
@@ -153,7 +153,7 @@ describe('contas, esperas e destaques', () => {
       ['C', 75],
       ['D', 25],
     ]);
-    expect(cards[0]).toMatchObject({ color: '#f08a3c', shareText: '75% do trabalho do dia', sessions: '2 sessões · 3 sub', tokens: '1,2 M', cost: 'US$ 4,50' });
+    expect(cards[0]).toMatchObject({ color: '#f08a3c', shareText: '75% do trabalho do dia', sessions: '2 sessões · 3 sub', tokens: '1,2 M', cost: 'R$ 4,50' });
     expect(cards[1]).toMatchObject({ sessions: '1 sessão', cost: '—' });
   });
 

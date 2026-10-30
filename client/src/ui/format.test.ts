@@ -89,8 +89,8 @@ describe('números', () => {
     expect(formatTokens(-3)).toBe('0');
   });
   it('formatUSD e formatInt em pt-BR', () => {
-    expect(formatUSD(1.234)).toBe('US$ 1,23');
-    expect(formatUSD(0)).toBe('US$ 0,00');
+    expect(formatUSD(1.234)).toBe('R$ 1,23');
+    expect(formatUSD(0)).toBe('R$ 0,00');
     expect(formatInt(12345)).toBe('12.345');
   });
   it('plural', () => {
