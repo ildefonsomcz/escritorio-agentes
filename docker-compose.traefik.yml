@@ -1,0 +1,21 @@
+# Para servidor com Traefik na frente (comum em EasyPanel, Coolify e Dokploy). Use junto com o docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+# Ajuste no .env: ESCRITORIO_DOMINIO, TRAEFIK_REDE (rede docker do Traefik) e TRAEFIK_CERT (nome do certresolver).
+services:
+  escritorio:
+    networks:
+      - default
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_REDE:-traefik}
+      traefik.http.routers.escritorio.rule: Host(`${ESCRITORIO_DOMINIO}`)
+      traefik.http.routers.escritorio.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.escritorio.tls.certresolver: ${TRAEFIK_CERT:-letsencrypt}
+      # a porta com login (o Traefik faz o HTTPS)
+      traefik.http.services.escritorio.loadbalancer.server.port: "4748"
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_REDE:-traefik}

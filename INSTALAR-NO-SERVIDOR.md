@@ -52,8 +52,16 @@ server {
 }
 ```
 
-Traefik / EasyPanel / Coolify: crie um serviço apontando para `escritorio-agentes:4748` (ou `127.0.0.1:4748`) com o
-domínio acima e HTTPS automático. Mantenha o cabeçalho `Host` original.
+Traefik (EasyPanel, Coolify, Dokploy): suba com o arquivo extra de rótulos, depois de ajustar `TRAEFIK_REDE` e
+`TRAEFIK_CERT` no `.env`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+```
+
+No EasyPanel/Coolify também dá para criar um app direto do repositório (build pelo `Dockerfile`), porta interna 4748,
+com o domínio acima e as mesmas variáveis do `.env.exemplo` (mais `HABBLAUD_REMOTE_INSECURE_HTTP=1` e
+`HABBLAUD_REMOTE_ALLOW=none`).
 
 ## Agente novo
 
