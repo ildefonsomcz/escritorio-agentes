@@ -11,6 +11,17 @@ Baseado no [Habblaud](https://github.com/marmottajr/habblaud) (MIT, Márcio Juni
 - Um subdomínio apontado para o servidor, por exemplo `escritorio.f2jsolucoes.com.br`.
 - A chave secreta do Supabase do Cérebro (Project Settings › API › `service_role` ou `sb_secret_...`).
 
+## Jeito rápido (servidor da F2J, com Traefik)
+
+```bash
+git clone https://github.com/ildefonsomcz/escritorio-agentes && cd escritorio-agentes
+sudo bash instalar.sh
+```
+
+O `instalar.sh` acha o Traefik, a rede e o certificado sozinho, pergunta só a chave secreta do Supabase e a senha do
+login (sem mostrar na tela), monta o `.env` e sobe tudo. Falta só o registro DNS A de `escritorio.f2jsolucoes.com.br`
+para o IP do servidor (no Cloudflare, sem a nuvem laranja). Para atualizar depois: `git pull && sudo bash instalar.sh`.
+
 ## Passo a passo
 
 ```bash
