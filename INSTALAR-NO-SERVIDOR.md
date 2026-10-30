@@ -52,12 +52,21 @@ server {
 }
 ```
 
-Traefik (EasyPanel, Coolify, Dokploy): suba com o arquivo extra de rótulos, depois de ajustar `TRAEFIK_REDE` e
-`TRAEFIK_CERT` no `.env`:
+**Servidor da F2J (Traefik):** o n8n.f2jsolucoes.com.br está atrás de um Traefik em Docker (as requisições chegam
+com `x-forwarded-server` = id de container e `x-real-ip`, que é o padrão do Traefik). É o modelo oficial de
+docker-compose do n8n, com certresolver `mytlschallenge` e entrypoint `websecure`.
 
 ```bash
+# 1. no painel de DNS, crie o registro A de escritorio.f2jsolucoes.com.br com o mesmo IP do n8n
+# 2. descubra a rede do Traefik
+docker ps --format '{{.Names}}' | grep -i traefik
+docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' <nome-do-container-do-traefik>
+# 3. ponha essa rede em TRAEFIK_REDE no .env e suba com os rótulos
 docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
 ```
+
+Se o certresolver do seu Traefik tiver outro nome, ajuste `TRAEFIK_CERT` (veja com
+`docker inspect <traefik> | grep certificatesresolvers`).
 
 No EasyPanel/Coolify também dá para criar um app direto do repositório (build pelo `Dockerfile`), porta interna 4748,
 com o domínio acima e as mesmas variáveis do `.env.exemplo` (mais `HABBLAUD_REMOTE_INSECURE_HTTP=1` e
