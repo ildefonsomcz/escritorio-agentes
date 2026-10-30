@@ -472,9 +472,13 @@ if (config.remote) {
 
 server.listen(config.port, config.host, () => {
   const host = config.host === '0.0.0.0' || config.host === '::' ? 'localhost' : config.host;
-  log.info(tr('🏢 Habblaud {0}{1}{2} em http://{3}:{4}', [config.version, config.dev ? ' (dev)' : '', config.inDocker ? ' (docker)' : '', host, config.port]));
+  log.info(
+    config.cerebro
+      ? `🏢 Escritório dos Agentes (Habblaud ${config.version})${config.inDocker ? ' (docker)' : ''} em http://${host}:${config.port} — fonte: Cérebro ${config.cerebro.fixture ? `(arquivo ${config.cerebro.fixture})` : (config.cerebro.url ?? '(sem CEREBRO_SUPABASE_URL)')}`
+      : tr('🏢 Habblaud {0}{1}{2} em http://{3}:{4}', [config.version, config.dev ? ' (dev)' : '', config.inDocker ? ' (docker)' : '', host, config.port]),
+  );
   const list = accounts.entries();
-  if (!list.length) log.warn(tr('Nenhuma pasta do Claude Code encontrada (defina HABBLAUD_CLAUDE_DIRS).'));
+  if (!list.length && !config.cerebro) log.warn(tr('Nenhuma pasta do Claude Code encontrada (defina HABBLAUD_CLAUDE_DIRS).'));
   for (const dir of codexDirsRefused(process.env, config.home)) {
     log.warn(tr('{0} é uma pasta do Codex, não do Claude Code: fica fora das contas do Claude Code.', [dir]));
   }
@@ -495,7 +499,7 @@ server.listen(config.port, config.host, () => {
   }
   if (office.isDemo()) log.info(tr('   Modo demonstração ligado (agentes simulados misturados aos reais).'));
   if (config.terminal) log.info(tr('   Terminal: ligado (acesso só local).'));
-  else log.info(tr('   Terminal: desligado ({0}).', [terminalOffReason(process.env, config.host, config.inDocker)]));
+  else log.info(tr('   Terminal: desligado ({0}).', [config.cerebro ? 'agentes do n8n' : terminalOffReason(process.env, config.host, config.inDocker)]));
   log.info(ptys ? tr('   Terminal interativo: ligado ({0}).', [claudeBin]) : tr('   Terminal interativo: {0}.', [ptyOff ?? tr('desligado')]));
   log.info(
     !spawn
@@ -511,7 +515,7 @@ server.listen(config.port, config.host, () => {
   log.info(
     config.messages
       ? tr('   Mensagens pelo escritório: ligadas (precisa do plugin habblaud-mensagens: npm run mod:install).')
-      : tr('   Mensagens pelo escritório: desligadas ({0}).', [messagesOffReason(process.env, config.host, config.inDocker)]),
+      : tr('   Mensagens pelo escritório: desligadas ({0}).', [config.cerebro ? 'agentes do n8n' : messagesOffReason(process.env, config.host, config.inDocker)]),
   );
   if (config.messages) {
     log.info(

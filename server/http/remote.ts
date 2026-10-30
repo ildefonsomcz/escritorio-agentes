@@ -311,7 +311,7 @@ export function loginPage(opts: { caDownload: boolean }): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>${esc(tr('Habblaud · entrar'))}</title>
+<title>Escritório dos Agentes · entrar</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -340,8 +340,8 @@ export function loginPage(opts: { caDownload: boolean }): string {
 </head>
 <body>
 <form id="f" autocomplete="on">
-  <h1>Habblaud</h1>
-  <p>${esc(tr('Acesso pelo celular. Entre com o usuário e a senha que você escolheu no npm run remote:setup.'))}</p>
+  <h1>Escritório dos Agentes</h1>
+  <p>Entre com o usuário e a senha definidos na instalação (instalar.sh).</p>
   <label for="u">${esc(tr('Usuário'))}</label>
   <input id="u" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required>
   <label for="p">${esc(tr('Senha'))}</label>
