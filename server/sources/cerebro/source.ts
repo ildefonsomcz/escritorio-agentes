@@ -96,6 +96,8 @@ interface AgentState {
   row: CerebroAgente;
   id: string;
   open: Map<string, number>;
+  /** Gatilho de cada execução aberta (ex.: "pedido do Salsicha"): fecha quando o colega termina. */
+  openGatilho: Map<string, string>;
   flashUntil: number;
   stats: AgentStats;
   statsDay: string;
@@ -329,7 +331,7 @@ export class CerebroSource implements AgentSource {
         roomKind: esc.tipo || 'sala',
         post: esc.posto,
       });
-      const state: AgentState = { row, id, open: new Map(), flashUntil: 0, stats: zero(), statsDay: dayOf(now) };
+      const state: AgentState = { row, id, open: new Map(), openGatilho: new Map(), flashUntil: 0, stats: zero(), statsDay: dayOf(now) };
       this.agents.set(row.slug, state);
       this.pushStats(state);
     }
@@ -352,9 +354,11 @@ export class CerebroSource implements AgentSource {
     this.seenExec.set(ex.id, key);
     if (running) {
       a.open.set(ex.id, started);
+      if (ex.gatilho) a.openGatilho.set(ex.id, ex.gatilho.toLowerCase());
       if (prev === undefined) this.office.addActivity(a.id, this.startActivity(a, ex, started), true, { feed: live });
     } else {
       a.open.delete(ex.id);
+      a.openGatilho.delete(ex.id);
       // início de uma execução que já terminou e nunca foi vista: entra no histórico, sem balão
       if (prev === undefined) this.office.addActivity(a.id, this.startActivity(a, ex, started), false, { feed: false });
     }
@@ -366,12 +370,16 @@ export class CerebroSource implements AgentSource {
     const what = ex.resumo?.trim();
     let text: string;
     let kind: ActivityKind = 'prompt';
-    if (rotina) {
+    const pedido = /^pedido d[oa] /i.exec(ex.gatilho ?? '');
+    if (pedido) {
+      kind = 'communicate';
+      text = `${ex.gatilho!.replace(/^pedido/i, 'Pedido')}${what ? `: ${what}` : ''}`;
+    } else if (rotina) {
       kind = 'plan';
       text = what ? `Rotina: ${what}` : `Rotina: ${ex.gatilho}`;
     } else if (canal === 'web') text = what ? `Site: ${what}` : 'Atendendo no site';
     else text = what ? what : 'Recebeu uma mensagem';
-    const icon = rotina ? '⏰' : (CANAL_ICON[canal] ?? '💬');
+    const icon = /^pedido d[oa] /i.test(ex.gatilho ?? '') ? '🤝' : rotina ? '⏰' : (CANAL_ICON[canal] ?? '💬');
     const act: Activity = { id: `${a.id}#e:${ex.id}`, kind, icon, text: fit(text), at };
     if (what && what.length > MAX_TEXT) act.detail = what;
     return act;
@@ -388,7 +396,18 @@ export class CerebroSource implements AgentSource {
     const hadStart = exec !== undefined && this.seenExec.has(exec);
     if (exec) {
       a.open.delete(exec);
+      a.openGatilho.delete(exec);
       this.seenExec.set(exec, 'fim');
+    }
+    // pedidos que este agente fez a colegas (subfluxos sem log de fim, ex.: "pedido do Salsicha") terminam com ele
+    const nome = a.row.nome.toLowerCase();
+    for (const other of this.agents.values()) {
+      if (other === a) continue;
+      for (const [id, g] of other.openGatilho) {
+        if (!g.includes(nome)) continue;
+        other.open.delete(id);
+        other.openGatilho.delete(id);
+      }
     }
     // pedido (só quando o início não foi registrado; senão o balão do início já mostrou)
     if (!hadStart && it.entrada?.trim()) {
@@ -476,7 +495,11 @@ export class CerebroSource implements AgentSource {
   private refreshAll(): void {
     const now = this.now();
     for (const a of this.agents.values()) {
-      for (const [id, started] of a.open) if (now - started >= this.cfg.timeoutMs) a.open.delete(id);
+      for (const [id, started] of a.open) {
+        if (now - started < this.cfg.timeoutMs) continue;
+        a.open.delete(id);
+        a.openGatilho.delete(id);
+      }
       if (a.statsDay !== dayOf(now)) {
         a.statsDay = dayOf(now);
         a.stats = zero();

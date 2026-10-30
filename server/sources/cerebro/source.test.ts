@@ -123,4 +123,25 @@ describe('CerebroSource', () => {
     expect(f.effects).toEqual([]);
     expect(f.status.get('n8n:fred')).toBe('idle');
   });
+
+  it('pedido a um colega (subfluxo sem fim registrado) termina quando quem pediu termina', () => {
+    const f = fakeOffice();
+    const src = new CerebroSource({ office: f.office, config: { pollMs: 3000, timeoutMs: 300_000 }, now: () => now });
+    src.apply(base, true);
+    src.apply(
+      {
+        ...base,
+        execucoes: [
+          { id: 's1', agente: 'salsicha', gatilho: 'chat', iniciado_em: iso(now - 5000), status: 'rodando' },
+          { id: 'd1', agente: 'dafne', canal: 'api', gatilho: 'pedido do Salsicha', resumo: 'Horas por pessoa', iniciado_em: iso(now - 3000), status: 'rodando' },
+        ],
+      },
+      false,
+    );
+    expect(f.status.get('n8n:dafne')).toBe('working');
+    expect(f.acts.some((x) => x.id === 'n8n:dafne' && x.a.icon === '🤝' && x.a.text.startsWith('Pedido do Salsicha'))).toBe(true);
+    src.apply({ ...base, interacoes: [{ id: 30, agente: 'salsicha', ocorrido_em: iso(now), status: 'ok', n8n_execution_id: 's1' }] }, false);
+    expect(f.status.get('n8n:salsicha')).toBe('idle');
+    expect(f.status.get('n8n:dafne')).toBe('idle');
+  });
 });
