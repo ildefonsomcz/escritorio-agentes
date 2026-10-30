@@ -15,11 +15,14 @@ import { DOOR_W, DOOR_X, TILE } from '../constants';
 import { AreaBuilder, type SpotOpts } from './builder';
 import { slotRect, slotSide } from './geometry';
 import type { AreaLayout, SpotDef, SpotKind } from './types';
+import { layoutRestaurantRoom } from './restaurant';
 
 export interface RoomInput {
   id: string;
   slot: number;
   seed: number;
+  /** Tipo da sala (RoomInfo.kind): 'restaurante' tem planta própria; 'cowork' fixa uma mesa de reunião. */
+  kind?: string;
 }
 
 const PLANTS_TALL = ['palm', 'ficus', 'monstera', 'bonsai'] as const;
@@ -67,11 +70,18 @@ export function roomVariant(seed: number): RoomVariant {
 }
 
 export function layoutProjectRoom(room: RoomInput, theme: RoomTheme): AreaLayout {
+  if (room.kind === 'restaurante') return layoutRestaurantRoom(room, theme);
   const rect = slotRect(room.slot);
   const side = slotSide(room.slot);
   const rng = mulberry32(room.seed ^ 0x5eed);
   const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length) % arr.length];
   const v = roomVariant(room.seed);
+  // co-work: mesa de reunião no canto (para trabalharem juntos) e canto de descanso
+  if (room.kind === 'cowork') {
+    v.meeting = 'table';
+    v.left = 'rest';
+    v.right = 'standdesk';
+  }
   const b = new AreaBuilder(room.id, 'room', rect);
   const area = b.area;
   area.side = side;

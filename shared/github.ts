@@ -183,6 +183,19 @@ export class RoomEffects {
     return true;
   }
 
+  /** Liga um efeito direto (fontes que não são do GitHub); true se mudou. */
+  set(roomId: string, kind: RoomEffect['kind'], text: string, now: number, ms: number, agentId?: string): boolean {
+    const slots = this.rooms.get(roomId) ?? {};
+    const fx: RoomEffect = { kind, text, at: now, until: now + ms };
+    if (agentId) fx.agentId = agentId;
+    if (kind === 'alarm') {
+      slots.alarm = fx;
+      delete slots.party;
+    } else slots.party = fx;
+    this.rooms.set(roomId, slots);
+    return true;
+  }
+
   /** Efeito visível da sala agora (a festa na frente do alarme), ou undefined. */
   get(roomId: string, now: number): RoomEffect | undefined {
     const slots = this.rooms.get(roomId);

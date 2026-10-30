@@ -179,9 +179,14 @@ export function formatInt(n: number): string {
   return integerFmt.format(n);
 }
 
-/** Custo em dólares: "US$ 1,23". */
+/**
+ * Custo. Nesta versão (agentes do n8n) o campo costUSD do protocolo carrega REAIS (custo_brl do Cérebro): o nome da
+ * função ficou para não espalhar a mudança, mas o texto sai em R$.
+ */
+const brlFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export function formatUSD(n: number): string {
-  return usdFmt.format(n).replace(/ /g, ' ');
+  void usdFmt;
+  return brlFmt.format(n).replace(/\s/g, ' ');
 }
 
 /** Percentual de uso limitado a 0–100 e arredondado. */

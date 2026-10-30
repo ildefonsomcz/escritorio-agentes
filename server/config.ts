@@ -58,6 +58,41 @@ export interface ServerConfig {
   remoteWarning?: string;
   /** Habblaud World (server/world/): conta, personagem e, nas próximas fases, o prédio no mundo. */
   world: WorldConfig;
+  /**
+   * Escritório dos agentes do n8n (fonte = banco do Cérebro). Ligado por padrão nesta versão; HABBLAUD_SOURCE=claude
+   * volta ao Habblaud original (Claude Code / Codex).
+   */
+  cerebro?: CerebroConfig;
+}
+
+export interface CerebroConfig {
+  /** URL do projeto Supabase do Cérebro (CEREBRO_SUPABASE_URL). */
+  url?: string;
+  /** Chave service_role / secret (CEREBRO_SUPABASE_KEY). Fica só no servidor. */
+  key?: string;
+  /** Intervalo da consulta (CEREBRO_POLL_MS, padrão 3000). */
+  pollMs: number;
+  /** Execução sem fim registrado vira "terminou" depois disto (CEREBRO_TIMEOUT_MIN, padrão 5). */
+  timeoutMs: number;
+  /** Arquivo JSON com a resposta da RPC, para desenvolvimento sem banco (CEREBRO_FIXTURE). */
+  fixture?: string;
+}
+
+/** Configuração da fonte do Cérebro (undefined = modo original do Habblaud). */
+export function parseCerebroConfig(env: NodeJS.ProcessEnv): CerebroConfig | undefined {
+  const source = env.HABBLAUD_SOURCE?.trim().toLowerCase();
+  if (source && source !== 'cerebro' && source !== 'n8n') return undefined;
+  const num = (v: string | undefined, def: number, min: number) => {
+    const n = Number.parseInt(v ?? '', 10);
+    return Number.isFinite(n) && n >= min ? n : def;
+  };
+  return {
+    url: env.CEREBRO_SUPABASE_URL?.trim().replace(/\/+$/, '') || undefined,
+    key: env.CEREBRO_SUPABASE_KEY?.trim() || undefined,
+    pollMs: num(env.CEREBRO_POLL_MS, 3000, 1000),
+    timeoutMs: num(env.CEREBRO_TIMEOUT_MIN, 5, 1) * 60_000,
+    fixture: env.CEREBRO_FIXTURE?.trim() || undefined,
+  };
 }
 
 export interface WorldConfig {
@@ -230,7 +265,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] 
   const host = env.HABBLAUD_HOST?.trim() || '127.0.0.1';
   const pkg = readPackage(rootDir);
   const remote = parseRemoteConfig(env, inDocker);
-  return {
+  const cerebro = parseCerebroConfig(env);
+  const cfg: ServerConfig = {
     port: Number.isFinite(port) && port > 0 && port < 65536 ? port : 4747,
     host,
     dev: argv.includes('--dev'),
@@ -252,5 +288,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] 
     remote: remote.config,
     remoteWarning: remote.warning,
     world: parseWorldConfig(env, argv),
+    cerebro,
   };
+  if (cerebro) {
+    // Agentes do n8n: nada do Claude Code/Codex, sem terminal, sem mensagens e sem o Habblaud World (o World só aceita
+    // o escritório real do Claude Code/Codex desta máquina; ver CLAUDE.md).
+    cfg.claudeDirs = [];
+    cfg.codex = false;
+    cfg.terminal = false;
+    cfg.messages = false;
+    cfg.updateCheck = false;
+    cfg.world = { enabled: false, dev: false };
+  }
+  return cfg;
 }

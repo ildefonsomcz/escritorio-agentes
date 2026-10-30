@@ -125,6 +125,8 @@ export interface SpotDef {
   rank?: number;
   /** Lado da ilha: 'S' = de costas (tela visível), 'N' = de frente (desk_back). */
   side?: 'S' | 'N';
+  /** Posto reservado (agentes do n8n): só quem tem AgentInfo.post igual senta aqui. */
+  post?: string;
 }
 
 export interface AreaLayout {

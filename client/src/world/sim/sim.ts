@@ -259,7 +259,7 @@ export class Sim {
     }
     // a primeira vaga livre do prédio (o slot do servidor só dá a ordem de chegada)
     const slot = this.freeSlot();
-    const layout = layoutProjectRoom({ id: r.id, slot, seed: r.seed }, theme);
+    const layout = layoutProjectRoom({ id: r.id, slot, seed: r.seed, kind: r.kind }, theme);
     const rs = new RoomState(r, theme, layout, first ? 'ready' : 'building', now, first, slot);
     this.rooms.set(r.id, rs);
     return rs;
@@ -504,7 +504,7 @@ export class Sim {
     ch.homeSpot = null;
     const room = this.rooms.get(ch.roomId);
     if (!room || !room.present) return;
-    const seat = chooseSeat(room.layout.spots, (id) => this.spots.isFree(id, ch.id), ch.info.kind);
+    const seat = chooseSeat(room.layout.spots, (id) => this.spots.isFree(id, ch.id), ch.info.kind, ch.info.post);
     if (seat && this.spots.reserve(seat.id, ch.id)) ch.homeSpot = seat.id;
   }
 
@@ -672,7 +672,7 @@ export class Sim {
   moveRoom(room: RoomState, slot: number, now: number): void {
     const before = room.layout;
     const ghostId = `${room.id}#mudança${++this.moveSeq}`;
-    const ghostLayout = layoutProjectRoom({ id: ghostId, slot: room.slot, seed: room.seed }, room.theme);
+    const ghostLayout = layoutProjectRoom({ id: ghostId, slot: room.slot, seed: room.seed, kind: room.info.kind }, room.theme);
     const ghost = new RoomState({ ...room.info, id: ghostId, seed: room.seed }, room.theme, ghostLayout, 'ready', now, false, room.slot);
     ghost.ghost = true;
     ghost.listed = false;
@@ -688,7 +688,7 @@ export class Sim {
     });
 
     room.slot = slot;
-    room.layout = layoutProjectRoom({ id: room.id, slot, seed: room.seed }, room.theme);
+    room.layout = layoutProjectRoom({ id: room.id, slot, seed: room.seed, kind: room.info.kind }, room.theme);
     room.setPhase('building', now);
     room.lightOn = false;
     room.lightAt = -1e9;
@@ -1207,6 +1207,13 @@ export class Sim {
         if (this.planOuting(ch, now)) return true;
         ch.nextOutingAt = now + idleSitMs(ch.rng, this.options().liveliness);
       }
+    } else if (ch.mode === 'idle' && !this.visit) {
+      // à toa há muito tempo: vai descansar na sala de descanso (lounge) em vez de cochilar na mesa
+      if (!ch.nextOutingAt) ch.nextOutingAt = now + idleSitMs(ch.rng, this.options().liveliness);
+      if (now >= ch.nextOutingAt) {
+        if (this.planRest(ch)) return true;
+        ch.nextOutingAt = now + 60_000;
+      }
     }
     // esperando um shell: só sai da mesa para uma roda (sozinho, fica na pipoca)
     if (ch.mode === 'shell') {
@@ -1278,7 +1285,7 @@ export class Sim {
   }
 
   private hasFreeSeat(room: RoomState, ch: Character): boolean {
-    return !!chooseSeat(room.layout.spots, (id) => this.spots.isFree(id, ch.id), ch.info.kind);
+    return !!chooseSeat(room.layout.spots, (id) => this.spots.isFree(id, ch.id), ch.info.kind, ch.info.post);
   }
 
   /** Tile livre para alguém ficar em pé (sem assento, sem spot e sem outra pessoa). */
@@ -1631,6 +1638,26 @@ export class Sim {
     ch.queue.push(...steps);
     this.pushHome(ch, carry);
     void now;
+    return true;
+  }
+
+  /** Descanso longo na sala de descanso: senta num sofá/poltrona/puff e cochila alguns minutos. */
+  private planRest(ch: Character): boolean {
+    const s = this.randomFree(LOUNGE_SEATS, ch);
+    if (!s || !this.reserveTemp(ch, s)) return false;
+    const rng = ch.rng;
+    const steps: Step[] = [];
+    this.pushLeave(ch, steps);
+    steps.push(
+      { t: 'go', tx: s.tx, ty: s.ty },
+      { t: 'enter', spot: s.id },
+      { t: 'act', pose: 'sit', ms: between(rng, 2000, 5000), icon: rng() < 0.4 ? 'music' : undefined },
+      { t: 'act', pose: 'sleep', ms: between(rng, 4 * 60_000, 9 * 60_000), icon: 'zzz' },
+      { t: 'exit' },
+      { t: 'do', fn: () => this.spots.release(s.id, ch.id) },
+    );
+    ch.queue.push(...steps);
+    this.pushHome(ch, 'none');
     return true;
   }
 

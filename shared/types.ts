@@ -145,6 +145,8 @@ export interface AgentInfo {
   look: 'f' | 'm';
   /** Papel. Principal: "Agente principal". Sub: tipo do subagente ("Explore", "Plan", "fork"...). */
   role: string;
+  /** Posto preferido dentro da sala (agentes do n8n: 'balcao', 'cozinha'...). O cliente senta o personagem ali. */
+  post?: string;
   /** Título da sessão (principal) ou descrição da tarefa (sub). */
   title?: string;
   sessionId: string;
@@ -207,6 +209,8 @@ export interface RoomInfo {
   createdAt: number;
   /** Efeito visual temporário na sala (eventos do GitHub detectados nos transcripts; ver shared/github.ts). */
   effect?: RoomEffect;
+  /** Tipo da sala (agentes do n8n): 'restaurante' | 'cowork' | 'sala'. Ausente = sala de projeto comum. */
+  kind?: string;
 }
 
 /**

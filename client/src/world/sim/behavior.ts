@@ -124,11 +124,17 @@ export function isLongIdle(status: AgentStatus, statusSince: number, now: number
  * Lugar de trabalho: mesa livre (por ordem de preferência); sem mesa, banqueta do canto de
  * reunião, depois poltrona/puff da sala e, por fim, um ponto em pé.
  */
-export function chooseSeat(spots: readonly SpotDef[], isFree: (id: string) => boolean, _kind: AgentKind): SpotDef | null {
-  const desks = spots.filter((s) => s.kind === 'desk' && isFree(s.id)).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
+export function chooseSeat(spots: readonly SpotDef[], isFree: (id: string) => boolean, _kind: AgentKind, post?: string): SpotDef | null {
+  // posto reservado (agentes do n8n): primeiro o do próprio agente; postos dos outros nunca
+  if (post) {
+    const mine = spots.find((s) => s.post === post && isFree(s.id));
+    if (mine) return mine;
+  }
+  const open = (s: SpotDef) => !s.post && isFree(s.id);
+  const desks = spots.filter((s) => s.kind === 'desk' && open(s)).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
   if (desks.length) return desks[0];
   for (const kind of ['stool', 'nook', 'stand'] as const) {
-    const free = spots.find((s) => s.kind === kind && isFree(s.id));
+    const free = spots.find((s) => s.kind === kind && open(s));
     if (free) return free;
   }
   return null;

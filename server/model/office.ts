@@ -107,6 +107,13 @@ export interface MainInput {
   startedAt: number;
   status: AgentStatus;
   waitingFor?: string;
+  /** Nome fixo do personagem (agentes do n8n: o nome do agente no Cérebro). Ausente = sorteado. */
+  name?: string;
+  look?: 'f' | 'm';
+  /** Tipo da sala (restaurante, cowork, sala): muda a decoração no cliente. */
+  roomKind?: string;
+  /** Posto preferido dentro da sala (ex.: 'balcao', 'cozinha'): o cliente senta o personagem ali. */
+  post?: string;
 }
 
 export interface SubInput {
@@ -158,7 +165,7 @@ export interface CommitResult {
   notices: Notice[];
 }
 
-type NoticeKind = 'arrive' | 'room' | 'wait' | 'deliver' | 'done' | 'leave' | 'shell' | 'shellDone' | 'github' | 'character';
+type NoticeKind = 'arrive' | 'room' | 'wait' | 'deliver' | 'done' | 'leave' | 'shell' | 'shellDone' | 'github' | 'character' | 'external';
 
 /** Pergunta ainda sem resposta (o balão dela já diz que o agente espera você). */
 function isOpenQuestion(a: Activity | undefined): boolean {
@@ -196,7 +203,7 @@ const byStart = (a: ShellJob, b: ShellJob) => a.startedAt - b.startedAt || a.id.
 
 export class Office {
   private agents = new Map<string, AgentRecord>();
-  private rooms = new Map<string, { path: string; createdAt: number }>();
+  private rooms = new Map<string, { path: string; createdAt: number; kind?: string }>();
   private slots = new SlotAllocator(SLOT_COOLDOWN_MS);
   private roomNames = new Map<string, string>();
   private feed: FeedItem[] = [];
@@ -323,11 +330,11 @@ export class Office {
       return;
     }
     const roomId = normalizeCwd(p.cwd);
-    this.ensureRoom(roomId, now);
-    const chosen = this.roomCharacter(roomId, p.id, p.sessionId);
+    this.ensureRoom(roomId, now, p.roomKind);
+    const chosen = p.name ? undefined : this.roomCharacter(roomId, p.id, p.sessionId);
     // A mesma sessão retomada noutro processo (ex.: "Assumir aqui") mantém o nome, mesmo com o processo antigo
     // ainda saindo do escritório.
-    const person = chosen ?? this.deps.names.assign(p.sessionId, this.takenNames(undefined, p.sessionId));
+    const person = p.name ? { name: p.name, look: p.look ?? 'm' } : (chosen ?? this.deps.names.assign(p.sessionId, this.takenNames(undefined, p.sessionId)));
     const info: AgentInfo = {
       id: p.id,
       kind: 'main',
@@ -347,6 +354,7 @@ export class Office {
       seed: chosen?.seed ?? hash32(p.id),
     };
     if (p.provider && p.provider !== 'claude') info.provider = p.provider;
+    if (p.post) info.post = p.post;
     if (chosen) {
       info.custom = true;
       if (chosen.parts) info.parts = { ...chosen.parts };
@@ -532,6 +540,23 @@ export class Office {
     const ci = ev.kind === 'ci_failed' || ev.kind === 'ci_passed';
     this.notice('github', id, d.level, d.notice, info.roomId, { dedupeKey: `${info.roomId}|gh|${githubEventKey(ev)}`, dedupeMs: ci ? 120_000 : NOTICE_DEDUPE_MS });
     if (this.effects.apply(info.roomId, ev, now, id)) this.markDirty();
+  }
+
+  /**
+   * Efeito visual numa sala vindo de fora do GitHub (agentes do n8n: alarme num erro, festa num lead enviado).
+   * `live: false` (carga inicial ou evento antigo) não liga nada.
+   */
+  roomEffect(id: string, kind: 'party' | 'alarm', text: string, ms: number, opts: { live?: boolean } = {}): void {
+    const rec = this.agents.get(id);
+    if (!rec || opts.live === false || this.booting) return;
+    if (this.effects.set(rec.info.roomId, kind, text, this.now(), ms, id)) this.markDirty();
+  }
+
+  /** Aviso (toast + feed de avisos) de uma fonte externa. */
+  externalNotice(id: string, level: 'info' | 'success' | 'alert', text: string): void {
+    const rec = this.agents.get(id);
+    if (!rec || this.booting) return;
+    this.notice('external', id, level, text, rec.info.roomId);
   }
 
   /** Rótulo do shell mais antigo (Bash antes de Monitor), quantos são e o detalhe (comando). */
@@ -953,18 +978,22 @@ export class Office {
 
   private build(): OfficeSnapshot {
     const now = this.now();
-    const entries = new Map(this.rooms);
+    const entries = new Map<string, { path: string; createdAt: number; kind?: string }>(this.rooms);
     for (const r of this.demoSnap?.rooms ?? []) entries.set(r.id, { path: r.path, createdAt: r.createdAt });
     this.slots.sync(entries.keys(), now);
     const rooms: RoomInfo[] = [...entries]
-      .map(([id, r]) => ({
-        id,
-        name: this.roomName(id),
-        path: r.path,
-        slot: this.slots.slotOf(id) ?? 0,
-        seed: hash32(id),
-        createdAt: r.createdAt,
-      }))
+      .map(([id, r]) => {
+        const room: RoomInfo = {
+          id,
+          name: this.roomName(id),
+          path: r.path,
+          slot: this.slots.slotOf(id) ?? 0,
+          seed: hash32(id),
+          createdAt: r.createdAt,
+        };
+        if (r.kind) room.kind = r.kind;
+        return room;
+      })
       .sort((a, b) => a.slot - b.slot);
     // festa/alarme (eventos do GitHub): das salas reais ou do demo
     for (const room of rooms) {
@@ -1038,9 +1067,16 @@ export class Office {
     return out;
   }
 
-  private ensureRoom(roomId: string, now: number): void {
-    if (this.rooms.has(roomId)) return;
-    this.rooms.set(roomId, { path: roomId, createdAt: now });
+  private ensureRoom(roomId: string, now: number, kind?: string): void {
+    const cur = this.rooms.get(roomId);
+    if (cur) {
+      if (kind && cur.kind !== kind) {
+        cur.kind = kind;
+        this.markDirty();
+      }
+      return;
+    }
+    this.rooms.set(roomId, kind ? { path: roomId, createdAt: now, kind } : { path: roomId, createdAt: now });
     this.recomputeRoomNames();
     this.notice('room', roomId, 'info', tr('🏗️ Nova sala: {0}', [this.roomName(roomId)]), roomId);
   }

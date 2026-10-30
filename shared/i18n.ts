@@ -71,10 +71,8 @@ function detect(): Locale {
     } catch {
       // localStorage bloqueado (modo privado, iframe): segue para os idiomas do navegador.
     }
-    for (const l of g.navigator?.languages ?? [g.navigator?.language ?? '']) {
-      const n = normalizeLocale(l);
-      if (n) return n;
-    }
+    // Escritório dos agentes: português por padrão (o idioma pode ser trocado em Configurações › Idioma).
+    void g.navigator;
     return 'pt-BR';
   }
   const env = g.process?.env ?? {};
