@@ -194,6 +194,22 @@ export interface AgentInfo {
    * AgentSummon.until); o cliente encena uma vez por `at`.
    */
   summon?: AgentSummon;
+  /**
+   * Trabalhando em outra sala (agentes do n8n: config.escritorio.visita no Cérebro, ex.: a Manu vai para o Comercial
+   * quando o assunto é comercial). Enquanto existe, o personagem trabalha num lugar livre dessa sala e depois volta ao
+   * próprio posto. O servidor tira o campo quando o assunto acaba.
+   */
+  workIn?: AgentWorkIn;
+}
+
+/** Sala onde o agente está trabalhando por um tempo (fora da própria). */
+export interface AgentWorkIn {
+  /** Id da sala (RoomInfo.id). */
+  room: string;
+  /** Nome da sala (para o balão). */
+  roomName: string;
+  /** Até quando vale, se nada renovar (epoch ms, relógio do servidor). */
+  until: number;
 }
 
 /** Um chamado ao vivo de outro agente (a gerente) para passar uma tarefa. */
@@ -229,7 +245,7 @@ export interface RoomInfo {
   createdAt: number;
   /** Efeito visual temporário na sala (eventos do GitHub detectados nos transcripts; ver shared/github.ts). */
   effect?: RoomEffect;
-  /** Tipo da sala (agentes do n8n): 'restaurante' | 'cowork' | 'gerencia' | 'sala'. Ausente = sala de projeto comum. */
+  /** Tipo da sala (agentes do n8n): 'restaurante' | 'cowork' | 'gerencia' | 'vibecode' | 'sala'. Ausente = sala de projeto comum. */
   kind?: string;
 }
 

@@ -3299,6 +3299,7 @@ export const FR: Readonly<Record<string, string>> = {
 
   // client/src/world/sim/sim.ts (chamado da gerente)
   "Ouvindo o {0}…": "Écoute {0}…",
+  "Trabalhando no {0}": "Travaille dans {0}",
   "Ouvindo a {0}…": "Écoute {0}…",
   "Tarefa para {0}": "Tâche pour {0}",
 };

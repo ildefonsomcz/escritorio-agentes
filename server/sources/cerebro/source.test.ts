@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Activity, AgentStatus } from '../../../shared/types';
 import type { MainInput, Office } from '../../model/office';
-import { CerebroSource, fixtureAt, isManager, norm, orderAgents, requesterOf, roomPathOf, type CerebroAgente, type CerebroEstado } from './source';
+import { CerebroSource, fixtureAt, isManager, norm, orderAgents, requesterOf, roomPathOf, visitRoomFor, type CerebroAgente, type CerebroEstado } from './source';
 
 function agente(slug: string, nome: string, esc: CerebroAgente['escritorio']): CerebroAgente {
   return { slug, nome, status: 'ativo', escritorio: esc };
@@ -27,6 +27,8 @@ function fakeOffice() {
   const effects: string[] = [];
   const summons: Array<{ id: string; by: string; text?: string; live?: boolean }> = [];
   const kinds: Array<{ id: string; kind: string }> = [];
+  const fixed: Array<Array<{ path: string; kind?: string }>> = [];
+  const workIn = new Map<string, { room: string; until: number }>();
   const office = {
     beginBoot() {},
     endBoot() {},
@@ -55,8 +57,15 @@ function fakeOffice() {
     setRoomKind(id: string, kind: string) {
       kinds.push({ id, kind });
     },
+    setFixedRooms(list: Array<{ path: string; kind?: string }>) {
+      fixed.push(list);
+    },
+    setWorkIn(id: string, room: string | undefined, until = 0) {
+      if (room) workIn.set(id, { room, until });
+      else workIn.delete(id);
+    },
   };
-  return { office: office as unknown as Office, mains, status, acts, effects, summons, kinds };
+  return { office: office as unknown as Office, mains, status, acts, effects, summons, kinds, fixed, workIn };
 }
 
 describe('orderAgents', () => {
@@ -281,5 +290,52 @@ describe('gerência e chamado da gerente', () => {
     const end = fixtureAt(st, now + 60_000);
     expect(end.execucoes[0]).toMatchObject({ status: 'ok' });
     expect(end.interacoes).toHaveLength(1);
+  });
+  it('salas fixas do Cérebro (ex.: Vibe Code) vão para o escritório com o tipo', () => {
+    const f = fakeOffice();
+    const src = new CerebroSource({ office: f.office, config: cfg, now: () => now });
+    src.apply({ ...base, salas: [{ nome: 'Vibe Code', tipo: 'VibeCode', ordem: 40 }, { nome: '  ' }] }, true);
+    expect(f.fixed.at(-1)).toEqual([{ path: '/agentes/Vibe Code', kind: 'vibecode' }]);
+    src.apply(base, false);
+    expect(f.fixed.at(-1)).toEqual([]);
+  });
+
+  describe('visita a outra sala (a Manu no Comercial)', () => {
+    const MANU_V = agente('manu', 'Manu', { sala: 'Diretoria', tipo: 'gerencia', ordem: 5, visual: 'f', visita: { Comercial: ['comercial', 'lead', 'crm'] } });
+    const SDR = agente('sdr-x', 'SDR X', { sala: 'Comercial', ordem: 20 });
+    const agentes = [MANU_V, SDR, ...AGENTES];
+    const st: CerebroEstado = { agora: iso(now), agentes, execucoes: [], interacoes: [] };
+
+    it('palavras sem diferenciar caixa nem acentos; a própria sala não conta', () => {
+      expect(visitRoomFor(MANU_V, ['Quantos LEADS chegaram?'])).toBe('/agentes/Comercial');
+      expect(visitRoomFor(MANU_V, ['Atividades do Comercial'])).toBe('/agentes/Comercial');
+      expect(visitRoomFor(MANU_V, ['vendas do restaurante'])).toBeUndefined();
+      expect(visitRoomFor(SDR, ['lead'])).toBeUndefined();
+    });
+
+    it('execução com assunto comercial: trabalha lá enquanto roda e um pouco depois', () => {
+      let t = now;
+      const f = fakeOffice();
+      const src = new CerebroSource({ office: f.office, config: cfg, now: () => t });
+      src.apply(st, true);
+      const ex = { id: 'm9', agente: 'manu', canal: 'telegram', gatilho: 'chat', resumo: 'Como está o CRM hoje?', iniciado_em: iso(t - 1000), status: 'rodando' };
+      src.apply({ ...st, execucoes: [ex] }, false);
+      expect(f.workIn.get('n8n:manu')?.room).toBe('/agentes/Comercial');
+      t += 60_000;
+      src.apply({ ...st, agora: iso(t), interacoes: [{ id: 90, agente: 'manu', ocorrido_em: iso(t), status: 'ok', n8n_execution_id: 'm9' }] }, false);
+      expect(f.workIn.get('n8n:manu')?.until).toBeGreaterThan(t);
+      t += 60_000;
+      src.apply({ ...st, agora: iso(t) }, false);
+      expect(f.workIn.has('n8n:manu')).toBe(false);
+    });
+
+    it('pedido da Manu a um agente do Comercial: ela vai até lá em vez de chamá-lo', () => {
+      const f = fakeOffice();
+      const src = new CerebroSource({ office: f.office, config: cfg, now: () => now });
+      src.apply(st, true);
+      src.apply({ ...st, execucoes: [pedido('x9', 'sdr-x'), pedido('s9', 'scooby')] }, false);
+      expect(f.summons.map((s) => s.id)).toEqual(['n8n:scooby']);
+      expect(f.workIn.get('n8n:manu')?.room).toBe('/agentes/Comercial');
+    });
   });
 });

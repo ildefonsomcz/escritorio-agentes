@@ -155,6 +155,7 @@ export type FurnitureKind =
   | 'stool' // 1x1 assento simples (banqueta). Personagem pode sentar em qualquer direção.
   | 'floor_lamp' // 1x1 luminária de chão. rects.glow = centro da luz.
   | 'water_cooler' // 1x1 bebedouro com galão azul. Uso: personagem fica ao SUL, virado para cima.
+  | 'aquarium' // 3x1 aquário grande (~2 m) sobre móvel baixo, encostado na parede norte. rects.glass = área da água (o render desenha os peixes e as bolhas).
   // --- montados na parede norte (mount: 'wall')
   | 'whiteboard' // 3 tiles de largura. Quadro kanban. rects.board = área onde o render desenha post-its.
   | 'window' // 2 tiles. Janela; rects.glass = vidro (o render desenha o céu antes da moldura).
@@ -233,6 +234,7 @@ export const FURNITURE: Readonly<Record<FurnitureKind, FurnitureDef>> = {
   stool: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: false, seat: true },
   floor_lamp: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
   water_cooler: { mount: 'floor', footprint: { w: 1, h: 1 }, blocks: true },
+  aquarium: { mount: 'floor', footprint: { w: 3, h: 1 }, blocks: true },
   whiteboard: { mount: 'wall', footprint: { w: 3, h: 0 }, blocks: false },
   window: { mount: 'wall', footprint: { w: 2, h: 0 }, blocks: false },
   clock: { mount: 'wall', footprint: { w: 1, h: 0 }, blocks: false },

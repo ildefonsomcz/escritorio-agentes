@@ -25,7 +25,7 @@ const evalJs = opt('eval', '');
 const clipArg = opt('clip', '');
 const clip = clipArg ? (([x, y, w, h]) => ({ x, y, width: w, height: h }))(clipArg.split(',').map(Number)) : undefined;
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) });
 const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
 const problems = [];
 page.on('console', (m) => {

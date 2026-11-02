@@ -127,6 +127,8 @@ export class Character {
   listeningTo: string | null = null;
   /** A gerente está na cabeceira (ou indo para lá) falando com quem chamou. */
   briefing = false;
+  /** Sala onde está (ou indo) trabalhar por um tempo (AgentInfo.workIn; sim.ts, planWorkIn). */
+  workInRoom: string | null = null;
 
   constructor(info: AgentInfo, appearance: Appearance) {
     this.id = info.id;

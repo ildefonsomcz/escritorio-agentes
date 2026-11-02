@@ -12,6 +12,17 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **Vibe Code: sala de convivência com aquário.** Um tipo de cômodo novo, `vibecode`, com um aquário grande (3 tiles,
+  uns 2 m na escala do escritório) com peixes nadando, bolhas, plantas e um castelinho; sofá virado para o aquário,
+  seis puffs (quatro em volta de uma mesinha), duas estações de código, fliperama, pôsteres e carpete roxo. Fica sempre
+  acesa e os colegas à toa vêm sentar no sofá e nos puffs e olhar os peixes.
+- **Salas fixas do Cérebro.** Salas cadastradas em `cerebro.escritorio_salas` (nome, tipo, ordem) existem no escritório
+  mesmo sem nenhum agente (a RPC `cerebro_escritorio_estado` devolve `salas`). A primeira é a "Vibe Code".
+- **Trabalhar em outra sala (`config.escritorio.visita`).** Mapa sala -> palavras: quando o pedido, a mensagem ou as
+  ferramentas de um agente tocam no assunto, ele vai trabalhar num lugar livre dessa sala ("Trabalhando no
+  Comercial") e volta ao posto quando o assunto acaba. A Manu usa isso para ir ao Comercial quando o assunto é
+  comercial (leads, CRM, SDR...), e quando ela passa tarefa a um agente do Comercial vai até ele em vez de chamá-lo à
+  Diretoria. Quem ela chama enquanto está fora vai até onde ela está.
 - **A Manu enxerga o escritório.** A página aberta manda ao servidor, a cada 15 s, onde cada agente está e o que faz na
   tela (jogando videogame com o Scooby, papo na copa, cochilando no lounge, no banheiro, trabalhando…), em
   `POST /api/cena` (`client/src/world/scene-report.ts`, `server/http/cena.ts`). O servidor guarda no Cérebro

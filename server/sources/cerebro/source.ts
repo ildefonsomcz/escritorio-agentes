@@ -28,6 +28,19 @@ export interface CerebroEscritorio {
   visual?: 'f' | 'm';
   /** slug do colega -> palavras que, no nome de uma ferramenta usada, indicam que ele ajudou. */
   colabora_com?: Record<string, string[]>;
+  /**
+   * Nome de outra sala -> palavras que, no pedido (resumo/gatilho), na mensagem ou nas ferramentas, fazem o agente ir
+   * trabalhar lá (ex.: a Manu vai para o "Comercial" quando o assunto é comercial). Também vale quando ela passa uma
+   * tarefa a um agente dessa sala: em vez de chamá-lo, ela vai até ele.
+   */
+  visita?: Record<string, string[]>;
+}
+
+/** Sala fixa do escritório (cerebro.escritorio_salas): existe mesmo sem agente, ex.: "Vibe Code". */
+export interface CerebroSala {
+  nome: string;
+  tipo?: string | null;
+  ordem?: number | null;
 }
 
 export interface CerebroAgente {
@@ -74,6 +87,7 @@ export interface CerebroInteracao {
 export interface CerebroEstado {
   agora: string;
   agentes: CerebroAgente[];
+  salas?: CerebroSala[];
   execucoes: CerebroExecucao[];
   interacoes: CerebroInteracao[];
 }
@@ -106,6 +120,12 @@ const SUMMON_FRESH_MS = 2 * 60_000;
 const BOSS_FLASH_MS = 30_000;
 /** Pedido, no chamado (o balão corta de novo). */
 const SUMMON_TEXT = 120;
+/** Visita a outra sala (config visita): depois que o assunto acaba, ainda fica lá por este tempo. */
+const VISIT_LINGER_MS = 20_000;
+/** Visita por uma interação sem início registrado (ou por passar uma tarefa a quem está lá). */
+const VISIT_FLASH_MS = 45_000;
+/** O prazo da visita anda em degraus deste tamanho (o snapshot não muda a cada segundo). */
+const VISIT_STEP_MS = 10_000;
 
 const CANAL_ICON: Record<string, string> = { telegram: '💬', whatsapp: '💬', web: '🌐', api: '🔗', cron: '⏰', email: '📧', outro: '⚙️' };
 
@@ -118,6 +138,10 @@ interface AgentState {
   flashUntil: number;
   stats: AgentStats;
   statsDay: string;
+  /** Visita a outra sala (config visita): sala (caminho), execuções abertas que a pedem e prazo depois que acabarem. */
+  visitRoom?: string;
+  visitExec: Set<string>;
+  visitUntil: number;
 }
 
 /** Texto para comparar sem diferenciar maiúsculas, acentos nem espaços repetidos. */
@@ -189,10 +213,37 @@ export function tipoOf(a: CerebroAgente): string {
   return norm(a.escritorio?.tipo) || 'sala';
 }
 
+/** Caminho (= id da sala no escritório) de uma sala pelo nome. */
+export function roomPathOfName(sala: string): string {
+  return `/agentes/${sala.trim().replace(/\//g, '-')}`;
+}
+
 /** Caminho (= id da sala no escritório) de um agente. */
 export function roomPathOf(a: CerebroAgente): string {
-  const sala = a.escritorio?.sala?.trim() || `Sala ${a.nome}`;
-  return `/agentes/${sala.replace(/\//g, '-')}`;
+  return roomPathOfName(a.escritorio?.sala?.trim() || `Sala ${a.nome}`);
+}
+
+/**
+ * Sala que o assunto pede (config visita): a primeira cujas palavras aparecem em algum dos textos (sem diferenciar
+ * caixa nem acentos). Devolve o caminho da sala, ou undefined.
+ */
+export function visitRoomFor(a: CerebroAgente, texts: readonly (string | null | undefined)[]): string | undefined {
+  const map = a.escritorio?.visita;
+  if (!map) return undefined;
+  const hay = texts.map((t) => norm(t)).filter(Boolean).join(' | ');
+  if (!hay) return undefined;
+  for (const [sala, words] of Object.entries(map)) {
+    if (!sala.trim() || !Array.isArray(words)) continue;
+    const path = roomPathOfName(sala);
+    if (path === roomPathOf(a)) continue;
+    if (words.some((w) => typeof w === 'string' && norm(w).length >= 3 && hay.includes(norm(w)))) return path;
+  }
+  return undefined;
+}
+
+/** O agente visita a sala `path` quando passa tarefa a quem está nela? (a sala está na config visita dele) */
+export function visitsRoom(a: CerebroAgente, path: string): boolean {
+  return Object.keys(a.escritorio?.visita ?? {}).some((sala) => sala.trim() && roomPathOfName(sala) === path);
 }
 
 /**
@@ -355,6 +406,7 @@ export class CerebroSource implements AgentSource {
     const agora = Date.parse(st.agora);
     this.lastAgora = Number.isFinite(agora) ? agora : this.now();
     this.syncAgents(st.agentes ?? []);
+    this.office.setFixedRooms((st.salas ?? []).filter((r) => r?.nome?.trim()).map((r) => ({ path: roomPathOfName(r.nome), kind: norm(r.tipo) || undefined })));
     const live = !boot;
     // pedidos de colegas primeiro: o fim de um deles (canal 'api') pode chegar na mesma leitura que o início
     for (const ex of st.execucoes ?? []) if (requesterOf(ex.gatilho) !== undefined) this.pedidoExec.add(ex.id);
@@ -401,7 +453,7 @@ export class CerebroSource implements AgentSource {
         roomKind: tipoOf(row),
         post: esc.posto,
       });
-      const state: AgentState = { row, id, open: new Map(), openGatilho: new Map(), flashUntil: 0, stats: zero(), statsDay: dayOf(now) };
+      const state: AgentState = { row, id, open: new Map(), openGatilho: new Map(), flashUntil: 0, stats: zero(), statsDay: dayOf(now), visitExec: new Set(), visitUntil: 0 };
       this.agents.set(row.slug, state);
       this.pushStats(state);
     }
@@ -422,7 +474,20 @@ export class CerebroSource implements AgentSource {
     const boss = this.managerOf(ex, a);
     if (boss && !this.summoned.has(ex.id)) {
       this.summoned.add(ex.id);
-      if (live && this.now() - started < SUMMON_FRESH_MS) this.summon(boss, a, ex, started);
+      if (live && this.now() - started < SUMMON_FRESH_MS) {
+        // a sala de quem foi chamado está na visita da gerente (ex.: Comercial): ela vai até lá em vez de chamar
+        const room = roomPathOf(a.row);
+        if (visitsRoom(boss.row, room)) this.visit(boss, room, this.now() + VISIT_FLASH_MS);
+        else this.summon(boss, a, ex, started);
+      }
+    }
+    // assunto que pede outra sala (config visita): trabalha lá enquanto a execução estiver aberta
+    if (running) {
+      const room = visitRoomFor(a.row, [ex.resumo, ex.gatilho]);
+      if (room) {
+        a.visitRoom = room;
+        a.visitExec.add(ex.id);
+      }
     }
     const prev = this.seenExec.get(ex.id);
     const key = running ? 'rodando' : 'fim';
@@ -551,6 +616,38 @@ export class CerebroSource implements AgentSource {
       this.office.externalNotice(a.id, 'success', `🎉 ${a.row.nome} enviou um lead para o CRM`);
     }
     this.helpers(a, tools, at);
+    if (!hadStart && it.status !== 'erro') {
+      const room = visitRoomFor(a.row, [it.entrada, it.intencao, ...tools]);
+      if (room) this.visit(a, room, this.now() + VISIT_FLASH_MS);
+    }
+  }
+
+  /** Visita: o agente vai trabalhar na sala `room` até pelo menos `until`. */
+  private visit(a: AgentState, room: string, until: number): void {
+    if (a.visitRoom !== room) a.visitExec.clear();
+    a.visitRoom = room;
+    a.visitUntil = Math.max(a.visitUntil, until);
+    this.pushVisit(a);
+  }
+
+  /** Manda (ou tira) a visita do agente para o escritório. */
+  private pushVisit(a: AgentState): void {
+    const now = this.now();
+    for (const id of a.visitExec) {
+      if (a.open.has(id)) a.visitUntil = Math.max(a.visitUntil, now + VISIT_LINGER_MS);
+      else {
+        a.visitExec.delete(id);
+        a.visitUntil = Math.max(a.visitUntil, now + VISIT_LINGER_MS);
+      }
+    }
+    if (!a.visitRoom || a.visitUntil <= now) {
+      a.visitRoom = undefined;
+      a.visitUntil = 0;
+      this.office.setWorkIn(a.id, undefined);
+      return;
+    }
+    const until = Math.ceil(a.visitUntil / VISIT_STEP_MS) * VISIT_STEP_MS;
+    this.office.setWorkIn(a.id, a.visitRoom, until);
   }
 
   /** Colegas que ajudaram (colabora_com no Cérebro, ou o nome do colega no nome da ferramenta). */
@@ -610,6 +707,7 @@ export class CerebroSource implements AgentSource {
       }
       const working = a.open.size > 0 || a.flashUntil > now;
       this.office.setStatus(a.id, working ? 'working' : 'idle');
+      if (a.visitRoom) this.pushVisit(a);
     }
   }
 

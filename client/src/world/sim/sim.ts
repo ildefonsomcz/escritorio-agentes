@@ -331,6 +331,9 @@ export class Sim {
     if (prevStatus !== a.status || hadShells || !!a.shells?.length || ch.mode === 'shell' || this.forcedOffline.has(ch.id)) this.refreshMode(ch);
     this.refreshShell(ch, now);
     if (a.summon) this.noticeSummon(ch, a.summon, now);
+    // trabalho em outra sala (ex.: a gerente no Comercial): larga o que faz e vai; sem o campo, o plano termina sozinho
+    const wi = a.workIn?.room;
+    if (wi && wi !== ch.roomId && wi !== ch.workInRoom && !this.visit && !ch.leaving && !ch.gone && this.rooms.get(wi)?.present) this.interrupt(ch);
   }
 
   /**
@@ -674,6 +677,8 @@ export class Sim {
     let dirty = false;
     for (const room of this.rooms.values()) {
       if (room.phase === 'building' && room.progress(now) >= 1) room.setPhase('ready', now);
+      // Vibe Code: sala de convivência, sempre acesa (o aquário brilha), mesmo sem ninguém dentro
+      if (room.info.kind === 'vibecode' && room.listed && !room.ghost && room.phase === 'ready' && !room.lightOn && !this.visit) room.setLight(true, now);
       if (room.phase === 'dismantling' && room.progress(now) >= 1) {
         room.setPhase('gone', now);
         dirty = true;
@@ -1219,6 +1224,7 @@ export class Sim {
     ch.chatUntil = 0;
     ch.listeningTo = null;
     ch.briefing = false;
+    ch.workInRoom = null;
   }
 
   releaseTemp(ch: Character): void {
@@ -1242,6 +1248,8 @@ export class Sim {
       ch.summonPending = null;
       if (now < p.expires && this.planSummon(ch, p)) return true;
     }
+    const wi = ch.info.workIn?.room;
+    if (wi && wi !== ch.roomId && wi !== ch.workInRoom && !this.visit && this.planWorkIn(ch, wi, now)) return true;
     const room = this.rooms.get(ch.roomId);
     if (!room || !room.present) return this.planLobby(ch, room);
     this.assignHome(ch);
@@ -1439,7 +1447,8 @@ export class Sim {
   private planSummon(ch: Character, p: NonNullable<Character['summonPending']>): boolean {
     const boss = this.chars.get(p.by);
     if (!boss || boss === ch || boss.gone || boss.leaving) return false;
-    const room = this.rooms.get(boss.roomId);
+    // a gerente trabalhando em outra sala (ex.: no Comercial): o chamado é lá
+    const room = this.rooms.get(boss.workInRoom ?? boss.roomId);
     if (!room || !room.present || room.ghost || room.id === ch.roomId) return false;
     const free = (s: SpotDef) => this.spots.isFree(s.id, ch.id);
     const spots = room.layout.spots;
@@ -1479,6 +1488,54 @@ export class Sim {
     // de volta ao posto com a tarefa na mão (sem lugar: o planejador acha um canto da sala)
     if (home) steps.push({ t: 'go', tx: home.tx, ty: home.ty, run, held: 'papers' }, { t: 'enter', spot: home.id });
     ch.queue.push(...steps);
+    return true;
+  }
+
+  /**
+   * Trabalho em outra sala (AgentInfo.workIn): vai até a sala, pega um lugar livre (mesa sem dono, banqueta/poltrona da
+   * sala ou ponto em pé), trabalha lá enquanto o servidor mantiver o campo e volta ao próprio posto.
+   */
+  private planWorkIn(ch: Character, roomId: string, now: number): boolean {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.present || room.ghost) return false;
+    const free = (s: SpotDef) => !s.post && this.spots.isFree(s.id, ch.id);
+    const spots = room.layout.spots;
+    const seat =
+      spots.find((s) => s.kind === 'desk' && free(s)) ??
+      spots.find((s) => (s.kind === 'nook' || s.kind === 'stool') && free(s)) ??
+      spots.find((s) => s.kind === 'stand' && free(s));
+    if (!seat || !this.reserveTemp(ch, seat)) return false;
+    ch.workInRoom = roomId;
+    const steps: Step[] = [];
+    this.pushLeave(ch, steps);
+    const run = Math.abs(seat.tx - ch.tx) + Math.abs(seat.ty - ch.ty) > SUMMON_RUN_TILES;
+    const laptop = seat.kind === 'nook' || seat.kind === 'stool' || seat.kind === 'stand';
+    const name = ch.info.workIn?.roomName ?? room.info.name;
+    steps.push(
+      { t: 'go', tx: seat.tx, ty: seat.ty, run },
+      { t: 'enter', spot: seat.id },
+      { t: 'do', fn: () => ch.showBubble('💼', tr('Trabalhando no {0}', [name]), 3500, this.now) },
+      {
+        t: 'until',
+        cond: () => ch.info.workIn?.room !== roomId,
+        minMs: 4000,
+        maxMs: 20 * 60_000,
+        pose: seat.kind === 'stand' ? 'read' : 'type',
+        held: laptop ? 'laptop' : 'none',
+      },
+      { t: 'exit' },
+      {
+        t: 'do',
+        fn: () => {
+          ch.workInRoom = null;
+          this.releaseTemp(ch);
+        },
+      },
+    );
+    const home = this.spots.get(ch.homeSpot);
+    if (home) steps.push({ t: 'go', tx: home.tx, ty: home.ty, run }, { t: 'enter', spot: home.id });
+    ch.queue.push(...steps);
+    void now;
     return true;
   }
 

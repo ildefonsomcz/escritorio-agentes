@@ -65,6 +65,8 @@ function build(kind: FurnitureKind, variant: string | undefined, state: number, 
       return O.floorLamp();
     case 'water_cooler':
       return O.waterCooler();
+    case 'aquarium':
+      return O.aquarium();
     case 'whiteboard':
       return W.whiteboard();
     case 'window':

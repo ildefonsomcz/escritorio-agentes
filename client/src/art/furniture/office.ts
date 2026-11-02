@@ -785,3 +785,91 @@ export function waterCooler(): BufFurniture {
   contact(b, 1, 13, 14, 4, 0.22);
   return { base: s };
 }
+
+// ------------------------------------------------------------------ aquário
+
+/** Área da água do aquário (coordenadas de desenho): o render nada os peixes e solta as bolhas aqui. */
+export const AQUARIUM_WATER = { x: 3, y: -26, w: 42, h: 24 } as const;
+
+/**
+ * Aquário grande (3x1, uns 2 m na escala do escritório) sobre um móvel baixo de madeira escura: tampa com luz,
+ * água em degradê, areia, pedras, plantas e um castelinho. Os peixes e as bolhas são animados pelo render
+ * (rects.glass = área da água).
+ */
+export function aquarium(): BufFurniture {
+  const s = floorSheet(3, 1, 34);
+  const b = s.buf;
+  const W = 48;
+  // ---- móvel (gabinete de madeira escura com duas portas)
+  const cab = M.walnut;
+  topFace(b, 0, 2, W, 3, cab);
+  frontFace(b, 0, 5, W, 11, cab);
+  b.vline(0, 5, 15, cab.lt);
+  b.vline(W / 2, 6, 14, cab.dd);
+  b.rect(W / 2 - 3, 9, 1, 3, '#c9b48a');
+  b.rect(W / 2 + 2, 9, 1, 3, '#c9b48a');
+  // ---- moldura do tanque
+  const frame = '#22262f';
+  const x0 = 1;
+  const x1 = W - 2;
+  const top = -31;
+  b.rect(x0, top, x1 - x0 + 1, 3, '#2d323e'); // tampa
+  b.hline(x0, x1, top, '#3d4352');
+  b.hline(x0 + 2, x1 - 2, top + 2, '#bff3ff'); // luz da tampa
+  b.vline(x0, top + 3, 2, frame);
+  b.vline(x0 + 1, top + 3, 2, frame);
+  b.vline(x1, top + 3, 2, frame);
+  b.vline(x1 - 1, top + 3, 2, frame);
+  b.hline(x0, x1, 1, frame);
+  // ---- água: degradê do turquesa claro (em cima) ao azul fundo (embaixo)
+  const wx = AQUARIUM_WATER.x - 1;
+  const wy = top + 3;
+  const ww = AQUARIUM_WATER.w + 2;
+  const wh = 1 - wy;
+  for (let i = 0; i < wh; i++) b.hline(wx, wx + ww - 1, wy + i, mix('#6fd6ea', '#1f5f8c', i / (wh - 1)));
+  b.hline(wx, wx + ww - 1, wy, '#a9ecf7'); // linha d'água
+  // ---- fundo: areia com pedrinhas coloridas
+  const r = rngOf(31, 7);
+  for (let x = wx; x < wx + ww; x++) {
+    const hgt = 2 + Math.round(Math.sin(x / 5) + r());
+    for (let y = 0; y > -hgt; y--) b.set(x, y, y === -hgt + 1 ? '#f1dfae' : '#dcc286');
+    if (r() < 0.22) b.set(x, -1, pick(r, ['#e05a5a', '#f2c14e', '#8d66cf', '#ffffff', '#4cae6a']));
+  }
+  // ---- plantas aquáticas (fitas verdes balançando)
+  const kelp = (x: number, h: number, tone: string) => {
+    for (let i = 0; i < h; i++) b.set(x + Math.round(Math.sin(i / 2.2) * 0.8), -2 - i, i % 3 === 0 ? shade(tone, 0.18) : tone);
+  };
+  kelp(5, 16, '#3fae5a');
+  kelp(7, 11, '#2f8c48');
+  kelp(9, 7, '#56c06b');
+  kelp(39, 18, '#3fae5a');
+  kelp(41, 13, '#2f8c48');
+  kelp(43, 9, '#56c06b');
+  kelp(28, 9, '#2f8c48');
+  // ---- pedra grande e castelinho
+  b.ellipse(17, -3, 5, 3, '#6d7583');
+  b.ellipse(16, -4, 3, 1.5, '#8a93a3');
+  const cx = 30;
+  b.rect(cx, -12, 7, 10, '#c9b8a0');
+  b.rect(cx - 2, -8, 3, 6, '#b8a68c');
+  b.rect(cx + 6, -8, 3, 6, '#b8a68c');
+  for (const tx of [cx, cx + 2, cx + 4, cx + 6]) b.set(tx, -13, '#c9b8a0');
+  b.rect(cx + 2, -6, 3, 4, '#3b2f2a'); // porta
+  b.set(cx + 3, -10, '#3b2f2a'); // janelinha
+  b.rect(cx + 3, -16, 1, 3, '#7a5a45'); // mastro
+  b.rect(cx + 4, -16, 2, 1, '#e05a5a'); // bandeira
+  // ---- estrela-do-mar na areia
+  b.set(22, -2, '#ec8a3c');
+  b.set(21, -2, '#ec8a3c');
+  b.set(23, -2, '#ec8a3c');
+  b.set(22, -3, '#ec8a3c');
+  // ---- vidro (reflexos leves)
+  for (let i = 0; i < wh - 2; i++) {
+    b.set(wx + 1, wy + 1 + i, 'rgba(255,255,255,0.28)');
+    if (i % 9 < 4) b.set(wx + 3 + Math.floor(i / 3), wy + 1 + i, 'rgba(255,255,255,0.16)');
+  }
+  b.outline();
+  contact(b, -1, 13, W + 2, 4, 0.26);
+  s.rects = { glass: rectAt(s, AQUARIUM_WATER.x, AQUARIUM_WATER.y, AQUARIUM_WATER.w, AQUARIUM_WATER.h) };
+  return { base: s };
+}

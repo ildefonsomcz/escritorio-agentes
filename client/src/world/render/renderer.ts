@@ -23,6 +23,7 @@ import { carSprite, propSprite, shadowSprite } from './props';
 import { countBadge, fallbackIcon } from './shell-sprites';
 import { decorateElevator, drawSeasonalLights, drawSeasonalWindow, seasonalCostume, seasonalFurniture } from './seasonal';
 import { buildAreaVis, furnitureSprites, opaqueBounds, paintShell, toWallVis, WALL_MARGIN, wallItemOrigin, wallSprites, type AreaVis, type FurnVis, type WallVis } from './scene';
+import { drawAquariumLife } from './aquarium';
 
 const enum K {
   FurnBase,
@@ -782,6 +783,10 @@ export class Renderer {
         this.safe(() => this.art.drawScreen(ctx, { x: dx + r.x, y: dy + r.y, w: r.w, h: r.h }, mode, now, f.seed));
       } else if (f.kind === 'coffee_machine' && state === 1) {
         this.drawSteam(f.ax, dy + 2, now, f.seed);
+      } else if (f.kind === 'aquarium' && s.rects?.glass) {
+        const r = s.rects.glass;
+        const light = area.room ? area.room.light(this.sim.now) : 1;
+        this.safe(() => drawAquariumLife(ctx, { x: dx + r.x, y: dy + r.y, w: r.w, h: r.h }, now, f.seed, light));
       } else if (f.kind === 'arcade' && s.rects?.screen) {
         // duelo no fliperama: as duas máquinas mostram a partida
         const seed = this.sim.social.arcadeSeed();

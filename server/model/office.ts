@@ -204,6 +204,8 @@ const byStart = (a: ShellJob, b: ShellJob) => a.startedAt - b.startedAt || a.id.
 export class Office {
   private agents = new Map<string, AgentRecord>();
   private rooms = new Map<string, { path: string; createdAt: number; kind?: string }>();
+  /** Salas fixas (agentes do n8n: cerebro.escritorio_salas): existem mesmo sem ninguém dentro. */
+  private fixedRooms = new Set<string>();
   private slots = new SlotAllocator(SLOT_COOLDOWN_MS);
   private roomNames = new Map<string, string>();
   private feed: FeedItem[] = [];
@@ -570,6 +572,55 @@ export class Office {
     const at = this.now();
     rec.info.summon = { by, byName: boss.info.name, at, until: at + ms, ...(text ? { text } : {}) };
     this.markDirty();
+  }
+
+  /**
+   * Agente `id` trabalhando em outra sala (`roomPath`) até `until` (agentes do n8n: config.escritorio.visita). Sem sala,
+   * volta ao próprio posto. Só muda o snapshot quando a sala muda ou o prazo anda (a fonte renova em degraus).
+   */
+  setWorkIn(id: string, roomPath: string | undefined, until = 0): void {
+    const rec = this.agents.get(id);
+    if (!rec) return;
+    const room = roomPath ? normalizeCwd(roomPath) : undefined;
+    const cur = rec.info.workIn;
+    if (!room || room === rec.info.roomId || !this.rooms.has(room) || until <= this.now()) {
+      if (cur) {
+        delete rec.info.workIn;
+        this.markDirty();
+      }
+      return;
+    }
+    if (cur && cur.room === room && cur.until === until) return;
+    rec.info.workIn = { room, roomName: this.roomName(room), until };
+    this.markDirty();
+  }
+
+  /**
+   * Salas fixas (agentes do n8n): cria as que faltam (com o tipo) e solta as que saíram da lista. Uma sala solta só some
+   * quando ninguém mais está nela.
+   */
+  setFixedRooms(list: readonly { path: string; kind?: string }[]): void {
+    const now = this.now();
+    const want = new Set<string>();
+    for (const r of list) {
+      const id = normalizeCwd(r.path);
+      want.add(id);
+      this.fixedRooms.add(id);
+      this.ensureRoom(id, now, r.kind);
+    }
+    let gone = false;
+    for (const id of [...this.fixedRooms]) {
+      if (want.has(id)) continue;
+      this.fixedRooms.delete(id);
+      if (![...this.agents.values()].some((a) => a.info.roomId === id)) {
+        this.rooms.delete(id);
+        gone = true;
+      }
+    }
+    if (gone) {
+      this.recomputeRoomNames();
+      this.markDirty();
+    }
   }
 
   /** Aviso (toast + feed de avisos) de uma fonte externa. */
@@ -981,10 +1032,18 @@ export class Office {
         summonGone = true;
       }
     }
+    // trabalho em outra sala vencido (ou a sala sumiu): volta ao posto
+    for (const rec of this.agents.values()) {
+      const w = rec.info.workIn;
+      if (w && (now >= w.until || !this.rooms.has(w.room))) {
+        delete rec.info.workIn;
+        summonGone = true;
+      }
+    }
     if (summonGone) this.markDirty();
     if (removed) {
       const occupied = new Set([...this.agents.values()].map((r) => r.info.roomId));
-      for (const id of [...this.rooms.keys()]) if (!occupied.has(id)) this.rooms.delete(id);
+      for (const id of [...this.rooms.keys()]) if (!occupied.has(id) && !this.fixedRooms.has(id)) this.rooms.delete(id);
       this.recomputeRoomNames();
       this.markDirty();
     }
