@@ -1,6 +1,6 @@
 # Escritório dos Agentes — instalar no servidor do n8n
 
-O escritório em pixel art dos agentes do n8n (Scooby, Jorge, Dafne, Salsicha, Fred e os SDRs). Ele lê o banco do
+O escritório em pixel art dos agentes do n8n (Manu, Scooby, Jorge, Dafne, Salsicha, Fred e os SDRs). Ele lê o banco do
 Cérebro a cada 3 segundos e mostra quem está trabalhando agora, o que cada um fez no dia, tokens e custo em R$.
 
 Baseado no [Habblaud](https://github.com/marmottajr/habblaud) (MIT, Márcio Junior). A licença original está em `LICENSE`.
@@ -92,12 +92,29 @@ Cadastre o agente em `cerebro.agentes` (slug, nome, domínio) e preencha `config
 ```
 
 - `sala`: agentes com a mesma sala dividem o cômodo; sala nova = cômodo novo, criado sozinho.
-- `tipo`: `sala` (padrão), `restaurante` (balcão, cozinha e salão) ou `cowork` (fica no meio da casa).
+- `tipo`: `sala` (padrão), `restaurante` (balcão, cozinha e salão), `cowork` (fica no meio da casa) ou `gerencia`
+  (sala da gerente geral: mesa executiva, mesa de reunião e placa; fica perto da entrada, logo depois do
+  restaurante). Trocar o `tipo` de uma sala existente redesenha a sala sozinho, em até 3 segundos.
 - `ordem`: posição no prédio (menor = mais perto da entrada).
 - `posto`: lugar fixo dentro da sala (`balcao` e `cozinha` no restaurante).
 - `visual`: `f` ou `m`.
 - `colabora_com`: `{ "dafne": ["paralelo", "synnapse"] }` — quando uma ferramenta com essas palavras é usada, a
   colega aparece ajudando.
+
+A Manu (gerente geral) fica na gerência:
+
+```json
+{ "sala": "Diretoria", "tipo": "gerencia", "ordem": 5, "papel": "Gerente geral", "visual": "f" }
+```
+
+**Chamado da gerente:** quando a Manu delega uma tarefa, o n8n grava em `cerebro.execucoes_ao_vivo` uma execução
+**do agente chamado** com `gatilho = 'pedido da Manu'` (maiúsculas e acentos não importam), `canal = 'api'` e
+`resumo` = o pedido. Ao vivo, a Manu mostra "Chamou o Scooby: <pedido>", o agente vai até a gerência, ouve a
+instrução por uns 7 segundos e volta para a mesa dele, onde fica trabalhando até a interação com o mesmo
+`n8n_execution_id` chegar (ou 5 minutos sem fim registrado). Vale para qualquer agente cujo nome ou slug esteja no
+gatilho e que esteja numa sala `gerencia` (ou tenha o slug `manu`). Execuções da carga inicial ou com mais de 2
+minutos não chamam ninguém. Diferente de "pedido do Salsicha", o pedido da gerente não termina quando a própria Manu
+termina o turno dela.
 
 No n8n, o fluxo do agente precisa do nó **Log Cerebro - Inicio** logo depois do gatilho (chama o subfluxo
 "CEREBRO - Registrar Inicio") para o personagem começar a trabalhar na hora em que a mensagem chega.
@@ -115,3 +132,7 @@ npm install
 node scripts/cerebro-fixture.mjs > /tmp/cerebro.json
 CEREBRO_FIXTURE=/tmp/cerebro.json npm run dev     # http://127.0.0.1:4747
 ```
+
+O exemplo agenda pedidos da Manu a cada minuto, a partir de 20 s depois de gerar o arquivo (`--chamado-em=60` para
+começar depois de 1 minuto, `--sem-chamados` para desligar): o servidor só lê do arquivo o que já aconteceu, então
+cada chamado aparece ao vivo.

@@ -97,7 +97,8 @@ export type SpotKind =
   | 'sink'
   | 'elevator'
   | 'talk'
-  | 'watch'; // ponto em pé da torcida (assistir a uma partida)
+  | 'watch' // ponto em pé da torcida (assistir a uma partida)
+  | 'listen'; // gerência: poltrona da mesa de reunião (quem a gerente chamou) e a cabeceira (a gerente, de pé)
 
 /**
  * Ponto de interesse. O personagem anda até o tile de aproximação (tx, ty), caminhável,

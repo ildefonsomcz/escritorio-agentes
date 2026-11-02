@@ -188,6 +188,26 @@ export interface AgentInfo {
    * e perguntou pela caixa de entrada há pouco. Ver POST /api/messages.
    */
   canMessage?: boolean;
+  /**
+   * Chamado da gerência (agentes do n8n: "pedido da Manu"): o agente levanta, vai até a sala de quem chamou, ouve a
+   * instrução por alguns segundos e volta ao posto. Só existe por um curto período depois do chamado (ver
+   * AgentSummon.until); o cliente encena uma vez por `at`.
+   */
+  summon?: AgentSummon;
+}
+
+/** Um chamado ao vivo de outro agente (a gerente) para passar uma tarefa. */
+export interface AgentSummon {
+  /** Id do agente que chamou (o cliente leva o chamado até a sala dele). */
+  by: string;
+  /** Nome de quem chamou (para o balão "Ouvindo a Manu…"). */
+  byName: string;
+  /** O pedido, já cortado (até ~120 caracteres). */
+  text?: string;
+  /** Quando o chamado aconteceu (epoch ms, relógio do servidor): um chamado novo tem outro `at`. */
+  at: number;
+  /** Até quando o chamado ainda vale para quem abrir a página (epoch ms, relógio do servidor). */
+  until: number;
 }
 
 export interface RoomInfo {
@@ -209,7 +229,7 @@ export interface RoomInfo {
   createdAt: number;
   /** Efeito visual temporário na sala (eventos do GitHub detectados nos transcripts; ver shared/github.ts). */
   effect?: RoomEffect;
-  /** Tipo da sala (agentes do n8n): 'restaurante' | 'cowork' | 'sala'. Ausente = sala de projeto comum. */
+  /** Tipo da sala (agentes do n8n): 'restaurante' | 'cowork' | 'gerencia' | 'sala'. Ausente = sala de projeto comum. */
   kind?: string;
 }
 

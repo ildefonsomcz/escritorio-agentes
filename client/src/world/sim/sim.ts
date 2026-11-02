@@ -1,12 +1,13 @@
 // Simulação do escritório: concilia snapshots do servidor com os personagens e salas do mundo,
 // planeja comportamentos e executa as filas de passos a cada frame.
 import { partsKey } from '../../../../shared/appearance';
-import type { AgentInfo, OfficeSnapshot, Provider, RoomInfo } from '../../../../shared/types';
+import type { AgentInfo, AgentSummon, OfficeSnapshot, Provider, RoomInfo } from '../../../../shared/types';
 import type { ArtModule, Dir, RoomTheme } from '../../art/api';
 import type { WorldOptions } from '../api';
 import { COL_W, COMPACT_DELAY_MS, DISMANTLE_DELAY_MS, FOOT_DX, FOOT_DY, MISSING_DEBOUNCE_MS, RUN_SPEED, TILE, WALK_SPEED } from '../constants';
 import { assembleBuilding, type BuildingLayout } from '../layout/building';
 import { RECEPTION_ID } from '../layout/core';
+import { GERENCIA_HEAD } from '../layout/gerencia';
 import { columnsFor, inRect } from '../layout/geometry';
 import { layoutProjectRoom } from '../layout/room';
 import type { SpotDef, SpotKind } from '../layout/types';
@@ -89,6 +90,12 @@ const INITIAL_LOUNGE_MIN_IDLE_MS = 90_000;
 /** Ninguém sai para passear nos primeiros segundos depois de abrir a página. */
 const INITIAL_OUTING_DELAY_MS = 5_000;
 const ENTER_MS = 180;
+/** Chamado da gerente: quanto tempo quem foi chamado fica ouvindo a instrução na sala dela. */
+export const LISTEN_MS = 7_000;
+/** Chamado que não deu para encenar até isto (ex.: preso no elevador) é esquecido. */
+const SUMMON_PENDING_MS = 15_000;
+/** Mais longe que isto (tiles), quem foi chamado vai correndo (atravessar o prédio andando demoraria demais). */
+const SUMMON_RUN_TILES = 40;
 
 function between(rng: () => number, a: number, b: number): number {
   return a + rng() * (b - a);
@@ -133,6 +140,8 @@ export class Sim {
   private moveSeq = 0;
   private shrinkPending = false;
   private nextHousekeeping = 0;
+  /** Relógio do servidor no último snapshot (o replay manda o horário da gravação). */
+  private serverTime = 0;
   /** Visita a um prédio do mundo (SimMode.visit). */
   readonly visit: boolean;
   /** Visita: o meu personagem (fora de `chars`: nem snapshot, nem vida social, nem lugar reservado). */
@@ -167,6 +176,7 @@ export class Sim {
     }
     this.lastSnapshot = input;
     this.now = now;
+    this.serverTime = input.serverTime ?? now;
     const first = !this.initialized;
     this.initialized = true;
     this.accounts = new Map(snap.accounts.map((a) => [a.id, { short: a.short, color: a.color, name: a.name, ...(a.provider === 'codex' ? { provider: a.provider } : {}) }]));
@@ -185,7 +195,12 @@ export class Sim {
         continue;
       }
       if (rs.info.name !== r.name || rs.info.seed !== r.seed) rs.version++;
+      const rekind = (rs.info.kind ?? '') !== (r.kind ?? '') && !rs.ghost;
       rs.info = r;
+      if (rekind) {
+        this.rekindRoom(rs, now);
+        layoutDirty = true;
+      }
       if (!rs.listed) {
         rs.listed = true;
         rs.readyToDismantleAt = 0;
@@ -315,6 +330,47 @@ export class Sim {
     // shells mudam sem mudar o status (ex.: comando em primeiro plano começou/terminou)
     if (prevStatus !== a.status || hadShells || !!a.shells?.length || ch.mode === 'shell' || this.forcedOffline.has(ch.id)) this.refreshMode(ch);
     this.refreshShell(ch, now);
+    if (a.summon) this.noticeSummon(ch, a.summon, now);
+  }
+
+  /**
+   * Chamado novo da gerente (AgentInfo.summon): interrompe o que estiver fazendo e, no próximo planejamento, vai até
+   * a sala dela (planSummon). Cada chamado (`at`) uma vez só; chamado vencido (relógio do servidor) não encena.
+   */
+  private noticeSummon(ch: Character, s: AgentSummon, now: number): void {
+    if (s.at === ch.summonAt) return;
+    ch.summonAt = s.at;
+    if (this.visit || ch.leaving || ch.gone || this.serverTime >= s.until) return;
+    ch.summonPending = { by: s.by, byName: s.byName, expires: now + SUMMON_PENDING_MS, ...(s.text ? { text: s.text } : {}) };
+    this.interrupt(ch);
+  }
+
+  /**
+   * O tipo da sala mudou (ex.: 'sala' -> 'gerencia'): mesma vaga, planta nova, com a animação de construção. Quem
+   * estava sentado ou indo para um lugar da planta antiga larga o lugar e replaneja.
+   */
+  private rekindRoom(room: RoomState, now: number): void {
+    const before = room.layout;
+    const old = new Set(before.spots.map((s) => s.id));
+    for (const ch of this.chars.values()) {
+      if (ch.gone) continue;
+      const touched = ch.roomId === room.id || inRect(before.rect, ch.tx, ch.ty) || (!!ch.atSpot && old.has(ch.atSpot)) || ch.tempSpots.some((id) => old.has(id));
+      if (!touched) continue;
+      this.spots.releaseAll(ch.id);
+      ch.homeSpot = null;
+      ch.tempSpots.length = 0;
+      if (ch.atSpot && old.has(ch.atSpot)) {
+        ch.atSpot = null;
+        ch.seated = false;
+        ch.sortY = null;
+      }
+      ch.standTile = null;
+      this.interrupt(ch);
+    }
+    room.layout = layoutProjectRoom({ id: room.id, slot: room.slot, seed: room.seed, kind: room.info.kind }, room.theme);
+    room.setPhase('building', now);
+    room.switchClaim = null;
+    room.version++;
   }
 
   /** Recalcula o modo e interrompe o plano se mudou. */
@@ -425,6 +481,8 @@ export class Sim {
     }
     const ch = new Character(a, appearance);
     ch.lastActivityId = a.activity?.id ?? null;
+    // chamado que já estava no ar quando o personagem apareceu (página aberta agora, chegada): não encena
+    ch.summonAt = a.summon?.at ?? 0;
     ch.shellDoneAt = latestShellDone(a)?.at ?? 0;
     this.chars.set(a.id, ch);
     if (first) return ch;
@@ -1159,6 +1217,8 @@ export class Sim {
     if (room && room.switchClaim === ch.id) room.switchClaim = null;
     if (ch.gathering) this.social.leave(ch, this.now);
     ch.chatUntil = 0;
+    ch.listeningTo = null;
+    ch.briefing = false;
   }
 
   releaseTemp(ch: Character): void {
@@ -1177,6 +1237,11 @@ export class Sim {
     if (ch.gone) return false;
     if (ch.mode === 'leave') return this.planLeave(ch, now);
     if (ch.mode === 'deliver') return this.planDeliver(ch, now);
+    if (ch.summonPending) {
+      const p = ch.summonPending;
+      ch.summonPending = null;
+      if (now < p.expires && this.planSummon(ch, p)) return true;
+    }
     const room = this.rooms.get(ch.roomId);
     if (!room || !room.present) return this.planLobby(ch, room);
     this.assignHome(ch);
@@ -1364,6 +1429,99 @@ export class Sim {
       { t: 'enter', spot: home },
     );
     ch.setIcon('chat', 2600, now);
+  }
+
+  /**
+   * Chamado da gerente: levanta, vai até a sala dela (uma poltrona livre da mesa de reunião; sem poltrona, um lugar
+   * livre da sala ou ao lado dela), ouve a instrução por LISTEN_MS e volta para o próprio lugar. A gerente, se estiver
+   * na mesa, vai até a cabeceira e fala (briefing). Sem a gerente no escritório (ou na mesma sala), não faz nada.
+   */
+  private planSummon(ch: Character, p: NonNullable<Character['summonPending']>): boolean {
+    const boss = this.chars.get(p.by);
+    if (!boss || boss === ch || boss.gone || boss.leaving) return false;
+    const room = this.rooms.get(boss.roomId);
+    if (!room || !room.present || room.ghost || room.id === ch.roomId) return false;
+    const free = (s: SpotDef) => this.spots.isFree(s.id, ch.id);
+    const spots = room.layout.spots;
+    const seat =
+      spots.find((s) => s.kind === 'listen' && s.group !== GERENCIA_HEAD && free(s)) ??
+      spots.find((s) => (s.kind === 'stool' || s.kind === 'nook' || s.kind === 'stand') && !s.post && free(s));
+    const steps: Step[] = [];
+    this.pushLeave(ch, steps);
+    const reserved = !!seat && this.reserveTemp(ch, seat);
+    const target = reserved && seat ? { x: seat.tx, y: seat.ty } : this.besideTile(boss, ch);
+    const run = Math.abs(target.x - ch.tx) + Math.abs(target.y - ch.ty) > SUMMON_RUN_TILES;
+    if (reserved && seat) steps.push({ t: 'go', tx: seat.tx, ty: seat.ty, run }, { t: 'enter', spot: seat.id });
+    else steps.push({ t: 'go', tx: target.x, ty: target.y, run });
+    const listening = boss.info.look === 'f' ? tr('Ouvindo a {0}…', [p.byName]) : tr('Ouvindo o {0}…', [p.byName]);
+    steps.push(
+      {
+        t: 'do',
+        fn: () => {
+          ch.listeningTo = boss.id;
+          if (!reserved || !seat?.seated) ch.dir = seat && reserved ? seat.dir : facing(ch.x, ch.y, boss.x, boss.y);
+          ch.showBubble('👂', listening, LISTEN_MS, this.now);
+          this.brief(boss, ch, p.text, this.now);
+        },
+      },
+      { t: 'act', pose: reserved && seat?.seated ? 'sit' : 'stand', ms: LISTEN_MS },
+      {
+        t: 'do',
+        fn: () => {
+          ch.listeningTo = null;
+          ch.setIcon('check', 1800, this.now);
+        },
+      },
+    );
+    if (reserved && seat) steps.push({ t: 'exit' });
+    steps.push({ t: 'do', fn: () => this.releaseTemp(ch) });
+    const home = this.spots.get(ch.homeSpot);
+    // de volta ao posto com a tarefa na mão (sem lugar: o planejador acha um canto da sala)
+    if (home) steps.push({ t: 'go', tx: home.tx, ty: home.ty, run, held: 'papers' }, { t: 'enter', spot: home.id });
+    ch.queue.push(...steps);
+    return true;
+  }
+
+  /** A gerente passa a tarefa a quem chegou: balão com o pedido e, da mesa, vai falar de pé na cabeceira. */
+  private brief(boss: Character, listener: Character, text: string | undefined, now: number): void {
+    if (boss.gone || boss.leaving) return;
+    const say = text ? (text.length > 44 ? `${text.slice(0, 43).trimEnd()}…` : text) : tr('Tarefa para {0}', [listener.info.name]);
+    boss.showBubble('🗣️', say, LISTEN_MS, now);
+    if (boss.briefing) return;
+    const home = this.spots.get(boss.homeSpot);
+    const atHome = !!home && boss.atSpot === home.id && !boss.step && !boss.queue.length;
+    if (!atHome || !home) {
+      boss.setIcon('chat', LISTEN_MS, now);
+      return;
+    }
+    const room = this.rooms.get(boss.roomId);
+    const head = room?.layout.spots.find((s) => s.kind === 'listen' && s.group === GERENCIA_HEAD);
+    if (!head || !this.reserveTemp(boss, head)) {
+      // sala sem cabeceira: fala sentada mesmo
+      boss.queue.push({ t: 'act', pose: 'talk', ms: LISTEN_MS, icon: 'chat' });
+      return;
+    }
+    boss.briefing = true;
+    boss.queue.push(
+      { t: 'exit' },
+      { t: 'go', tx: head.tx, ty: head.ty, fx: head.x, fy: head.y, dir: head.dir },
+      { t: 'until', cond: () => !this.anyListening(boss.id), minMs: 2500, maxMs: 20_000, pose: 'talk', held: 'none', dir: head.dir },
+      {
+        t: 'do',
+        fn: () => {
+          boss.briefing = false;
+          this.releaseTemp(boss);
+        },
+      },
+      { t: 'go', tx: home.tx, ty: home.ty },
+      { t: 'enter', spot: home.id },
+    );
+  }
+
+  /** Alguém ainda está ouvindo a instrução desta gerente? */
+  private anyListening(bossId: string): boolean {
+    for (const c of this.chars.values()) if (!c.gone && c.listeningTo === bossId) return true;
+    return false;
   }
 
   private planLeave(ch: Character, now: number): boolean {
@@ -1911,6 +2069,9 @@ export class Sim {
         ch.step = null;
       }
       ch.gathering = null;
+      ch.summonPending = null;
+      ch.listeningTo = null;
+      ch.briefing = false;
       if (ch.leaving && !ch.gone) ch.gone = true;
       if (ch.gone) {
         this.spots.releaseAll(ch.id);

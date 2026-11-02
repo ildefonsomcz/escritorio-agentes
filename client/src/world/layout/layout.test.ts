@@ -6,6 +6,7 @@ import { columnsFor, slotAt, slotColumn, slotRect, slotSide } from './geometry';
 import { layoutProjectRoom, roomVariant } from './room';
 import { layoutExterior, slotShell } from './exterior';
 import { RECEPTION_ID } from './core';
+import { GERENCIA_HEAD } from './gerencia';
 import type { AreaLayout } from './types';
 
 const theme: RoomTheme = {
@@ -234,5 +235,49 @@ describe('itens de parede', () => {
     const restroom = coreAreas().find((a) => a.kind === 'restroom')!;
     expect(restroom.wallItems.some((w) => w.kind === 'door_frame')).toBe(true);
     for (const room of roomsFor([1, 3, 7])) expect(room.wallItems.some((w) => w.kind === 'door_frame'), room.id).toBe(true);
+  });
+});
+
+describe('gerência (sala do tipo gerencia)', () => {
+  it('planta própria, válida dos dois lados do corredor: mesa da chefe, poltronas de reunião, cabeceira e placa', () => {
+    for (const slot of [0, 1, 2, 5]) {
+      for (const seed of [1, 77, 4242]) {
+        const room = layoutProjectRoom({ id: `/agentes/Diretoria`, slot, seed, kind: 'gerencia' }, theme);
+        const b = assembleBuilding(columnsFor([slot]), [room]);
+        const used = new Map<string, string>();
+        for (const f of room.furniture) {
+          const def = FURNITURE[f.kind];
+          for (let y = f.ty; y < f.ty + def.footprint.h; y++)
+            for (let x = f.tx; x < f.tx + def.footprint.w; x++) {
+              expect(x >= room.rect.x + 1 && x < room.rect.x + 15 && y >= room.rect.y + 2 && y < room.rect.y + 11, `${f.id} fora do piso`).toBe(true);
+              if (!def.blocks) continue;
+              expect(used.get(`${x},${y}`), `${f.id} sobre ${used.get(`${x},${y}`)}`).toBeUndefined();
+              used.set(`${x},${y}`, f.id);
+            }
+        }
+        const door = room.door!;
+        const reach = b.grid.reachableFrom(door.x, door.y);
+        for (const sp of room.spots) {
+          expect(reach[sp.ty * b.grid.w + sp.tx], `${sp.id} inalcançável (vaga ${slot})`).toBe(1);
+          expect(b.grid.walkable(sp.tx, sp.ty), `${sp.id} sobre móvel`).toBe(true);
+        }
+        // a passagem da porta fica livre de ponta a ponta
+        for (let y = room.rect.y + 2; y < room.rect.y + 11; y++) expect(b.grid.walkable(room.rect.x + 7, y) || b.grid.walkable(room.rect.x + 8, y)).toBe(true);
+        const desks = room.spots.filter((s) => s.kind === 'desk');
+        expect(desks).toHaveLength(1);
+        expect(room.furniture.find((f) => f.id === desks[0].deskId)?.kind).toBe('desk_back');
+        const listen = room.spots.filter((s) => s.kind === 'listen');
+        expect(listen.filter((s) => s.group === GERENCIA_HEAD)).toHaveLength(1);
+        expect(listen.filter((s) => s.group !== GERENCIA_HEAD && s.seated).length).toBeGreaterThanOrEqual(6);
+        expect(room.furniture.some((f) => f.kind === 'meeting_table')).toBe(true);
+        expect(room.spots.some((s) => s.kind === 'switch')).toBe(true);
+        expect(room.signId).toBeDefined();
+        expect(hiddenWallItems(room)).toEqual([]);
+        if (slotSide(slot) === 'south') expect(room.wallItems.some((w) => w.kind === 'door_frame')).toBe(true);
+        // visivelmente diferente de uma sala comum: piso de madeira e lambri
+        expect(room.floors.every((f) => f.kind === 'wood')).toBe(true);
+        expect(room.walls.some((w) => w.style.pattern === 'wood_panel')).toBe(true);
+      }
+    }
   });
 });

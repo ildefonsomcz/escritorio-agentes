@@ -463,6 +463,31 @@ describe('Office', () => {
     expect(off.agents.map((a) => a.id)).toEqual(['acc:1']);
   });
 
+  it('chamado da gerente: vai no snapshot por um tempo, some sozinho e nunca durante o boot; tipo da sala muda', () => {
+    const { office, advance, now } = makeOffice();
+    office.addMain({ id: 'n8n:manu', account: 'n8n', sessionId: 'n8n:manu', cwd: '/agentes/Diretoria', role: 'Gerente geral', startedAt: now(), status: 'idle', name: 'Manu', look: 'f', roomKind: 'sala' });
+    office.addMain({ id: 'n8n:scooby', account: 'n8n', sessionId: 'n8n:scooby', cwd: '/agentes/Restaurante', role: 'x', startedAt: now(), status: 'idle', name: 'Scooby', roomKind: 'restaurante', post: 'balcao' });
+    office.summon('n8n:scooby', 'n8n:manu', 'Fechamento do dia', 20_000);
+    let scooby = office.commit().snapshot.agents.find((a) => a.id === 'n8n:scooby')!;
+    expect(scooby.summon).toEqual({ by: 'n8n:manu', byName: 'Manu', text: 'Fechamento do dia', at: now(), until: now() + 20_000 });
+    // ninguém chama a si mesmo nem quem não existe; evento antigo não chama
+    office.summon('n8n:manu', 'n8n:manu', 'x', 20_000);
+    office.summon('n8n:manu', 'n8n:ninguem', 'x', 20_000);
+    office.summon('n8n:manu', 'n8n:scooby', 'x', 20_000, { live: false });
+    expect(office.commit().snapshot.agents.find((a) => a.id === 'n8n:manu')!.summon).toBeUndefined();
+    advance(20_001);
+    office.tick();
+    scooby = office.commit().snapshot.agents.find((a) => a.id === 'n8n:scooby')!;
+    expect(scooby.summon).toBeUndefined();
+    office.beginBoot();
+    office.summon('n8n:scooby', 'n8n:manu', undefined, 20_000);
+    office.endBoot();
+    expect(office.commit().snapshot.agents.find((a) => a.id === 'n8n:scooby')!.summon).toBeUndefined();
+    // config.escritorio.tipo trocado no banco: a mesma sala passa a ser a gerência
+    office.setRoomKind('n8n:manu', 'gerencia');
+    expect(office.commit().snapshot.rooms.find((r) => r.id === '/agentes/Diretoria')!.kind).toBe('gerencia');
+  });
+
   it('meta.terminal: só com o terminal ligado', () => {
     expect(makeOffice().office.commit().snapshot.meta.terminal).toBe(false);
     const deps = { names: new NameStore(null), version: 't', startedAt: 0, accounts: () => [], sources: () => [], accountName: () => undefined };

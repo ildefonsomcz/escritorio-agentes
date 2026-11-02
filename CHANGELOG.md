@@ -10,6 +10,27 @@ do meio (0.**3**.0).
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Gerência: a sala da gerente geral dos agentes do n8n.** Um tipo de cômodo novo, `gerencia` (em
+  `config.escritorio.tipo`), com cara de diretoria: piso de madeira, lambri, tapetes vinho e azul-marinho, mesa
+  executiva escura com gaveteiros e poltrona de chefe, mesa de reunião com poltronas, estante, plantas e a placa com o
+  nome da sala (ex.: "Diretoria"). Fica perto da entrada, logo depois do restaurante (o co-work vai depois dela).
+  Trocar o tipo de uma sala no banco redesenha a mesma sala com a planta nova, sem reiniciar o escritório.
+- **Chamado da gerente.** Quando a Manu delega uma tarefa (execução do agente chamado com gatilho `pedido da Manu`,
+  sem diferenciar maiúsculas nem acentos), ao vivo: ela mostra "Chamou o Scooby: <pedido>", o agente chamado levanta,
+  anda até a gerência, senta numa poltrona da mesa de reunião ouvindo ("Ouvindo a Manu…") enquanto ela fala de pé na
+  cabeceira, e volta para a própria mesa (ou posto, no restaurante) para trabalhar até a execução terminar. Vários
+  chamados ao mesmo tempo vão todos, cada um num lugar. Sem a Manu no escritório, o agente só trabalha na mesa. O
+  timelapse também mostra o chamado (e a planta certa do restaurante e da gerência).
+- **Dados de exemplo:** `scripts/cerebro-fixture.mjs` traz a Manu e agenda pedidos dela a cada minuto, começando 20 s
+  depois de gerar o arquivo (`--chamado-em=<s>`, `--sem-chamados`); o servidor só lê do arquivo o que já aconteceu.
+
+### Corrigido
+
+- **O fim de um pedido de colega pelo canal `api` não vira mais "Lead novo no CRM!".** Só o canal `api` de uma
+  execução que não veio de um pedido ("pedido do/da X") conta como lead enviado.
+
 ## [1.0.3] - 2026-10-16
 
 ### Corrigido

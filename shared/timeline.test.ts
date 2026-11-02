@@ -14,6 +14,7 @@ import {
   shiftDay,
   toAccountInfo,
   toAgentInfo,
+  toRoomInfo,
   type TimelineFrame,
 } from './timeline';
 
@@ -201,6 +202,20 @@ describe('timeline: leitura do arquivo', () => {
     const acc = toAccountInfo(compactSnapshot(snap([])).accounts.get('.claude')!, T0 + 99);
     expect(acc.usage).toEqual({ source: 'statusline', fetchedAt: T0 + 99, fiveHour: { utilization: 10, resetsAt: T0 + 3_600_000 } });
     expect(acc.configDir).toBe('');
+  });
+
+  it('agentes do n8n: tipo da sala, posto e chamado da gerente vão e voltam (o replay encena o chamado)', () => {
+    const summon = { by: 'n8n:manu', byName: 'Manu', text: 'x'.repeat(200), at: T0, until: T0 + 20_000 };
+    const c = compactAgent(agent('n8n:scooby', { post: 'balcao', summon }));
+    expect(c.post).toBe('balcao');
+    expect(c.summon?.text?.length).toBeLessThanOrEqual(120);
+    const a = toAgentInfo(c);
+    expect(a.post).toBe('balcao');
+    expect(a.summon).toMatchObject({ by: 'n8n:manu', byName: 'Manu', at: T0, until: T0 + 20_000 });
+    expect('summon' in compactAgent(agent('x'))).toBe(false);
+    const f = compactSnapshot(snap([], [{ ...room('/agentes/Diretoria'), kind: 'gerencia' }]));
+    expect(toRoomInfo(f.rooms.get('/agentes/Diretoria')!).kind).toBe('gerencia');
+    expect('kind' in toRoomInfo(compactSnapshot(snap([])).rooms.get('/p/loja')!)).toBe(false);
   });
 
   it('parts do personagem editado vão e voltam; agente sem parts continua sem', () => {

@@ -368,6 +368,12 @@ export class Office {
     this.markDirty();
   }
 
+  /** Tipo da sala de um agente mudou (agentes do n8n: config.escritorio.tipo): a sala é redesenhada com a planta nova. */
+  setRoomKind(id: string, kind: string): void {
+    const rec = this.agents.get(id);
+    if (rec) this.ensureRoom(rec.info.roomId, this.now(), kind);
+  }
+
   /** Mesmo processo, sessão nova (/clear, /resume): o personagem continua, tarefas e números zeram. */
   switchSession(id: string, sessionId: string): void {
     const rec = this.agents.get(id);
@@ -550,6 +556,20 @@ export class Office {
     const rec = this.agents.get(id);
     if (!rec || opts.live === false || this.booting) return;
     if (this.effects.set(rec.info.roomId, kind, text, this.now(), ms, id)) this.markDirty();
+  }
+
+  /**
+   * Chamado ao vivo (agentes do n8n): `by` chamou o agente `id` para passar uma tarefa. O snapshot leva
+   * AgentInfo.summon por `ms`; o cliente faz o personagem ir até a sala de quem chamou e voltar. `live: false`
+   * (carga inicial ou evento antigo) e o boot não chamam ninguém.
+   */
+  summon(id: string, by: string, text: string | undefined, ms: number, opts: { live?: boolean } = {}): void {
+    const rec = this.agents.get(id);
+    const boss = this.agents.get(by);
+    if (!rec || !boss || id === by || opts.live === false || this.booting) return;
+    const at = this.now();
+    rec.info.summon = { by, byName: boss.info.name, at, until: at + ms, ...(text ? { text } : {}) };
+    this.markDirty();
   }
 
   /** Aviso (toast + feed de avisos) de uma fonte externa. */
@@ -953,6 +973,15 @@ export class Office {
     }
     // festa acabou / alarme expirou: o snapshot sai sem o efeito
     if (this.effects.prune(now)) this.markDirty();
+    // chamado da gerente expirado: sai do snapshot
+    let summonGone = false;
+    for (const rec of this.agents.values()) {
+      if (rec.info.summon && now >= rec.info.summon.until) {
+        delete rec.info.summon;
+        summonGone = true;
+      }
+    }
+    if (summonGone) this.markDirty();
     if (removed) {
       const occupied = new Set([...this.agents.values()].map((r) => r.info.roomId));
       for (const id of [...this.rooms.keys()]) if (!occupied.has(id)) this.rooms.delete(id);

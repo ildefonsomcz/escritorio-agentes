@@ -13,7 +13,7 @@
 // Só entram os campos que o mundo e a interface usam para desenhar, com os resumos de atividade já
 // mascarados (a mesma exposição do /api/snapshot): nada de detalhe de comando, tarefa ou transcript.
 import type { AppearanceParts } from './appearance';
-import type { AccountInfo, AccountUsage, Activity, ActivityKind, AgentInfo, AgentKind, AgentStatus, OfficeSnapshot, Provider, RoomInfo, ShellJob } from './types';
+import type { AccountInfo, AccountUsage, Activity, ActivityKind, AgentInfo, AgentKind, AgentStatus, AgentSummon, OfficeSnapshot, Provider, RoomInfo, ShellJob } from './types';
 
 export const TIMELINE_VERSION = 1;
 
@@ -61,6 +61,10 @@ export interface TimelineAgent {
   background?: true;
   title?: string;
   shells?: TimelineShell[];
+  /** Posto na sala (agentes do n8n; AgentInfo.post). */
+  post?: string;
+  /** Chamado da gerente em andamento (AgentInfo.summon), com o pedido cortado. */
+  summon?: AgentSummon;
   /** Agente do modo demonstração (id com prefixo "demo:"): o player pode escondê-lo. */
   demo?: true;
 }
@@ -72,6 +76,8 @@ export interface TimelineRoom {
   slot: number;
   seed: number;
   createdAt: number;
+  /** Tipo da sala (agentes do n8n; RoomInfo.kind): o replay desenha a planta certa. */
+  kind?: string;
   demo?: true;
 }
 
@@ -204,12 +210,15 @@ export function compactAgent(a: AgentInfo, demo = false): TimelineAgent {
   if (a.parts && Object.keys(a.parts).length) out.parts = { ...a.parts };
   if (a.title) out.title = clip(a.title, MAX_TITLE);
   if (a.shells?.length) out.shells = a.shells.map(compactShell);
+  if (a.post) out.post = a.post;
+  if (a.summon) out.summon = { ...a.summon, ...(a.summon.text ? { text: clip(a.summon.text, MAX_TEXT) } : {}) };
   if (demo) out.demo = true;
   return out;
 }
 
 export function compactRoom(r: RoomInfo, demo = false): TimelineRoom {
   const out: TimelineRoom = { id: r.id, name: r.name, path: r.path, slot: r.slot, seed: r.seed, createdAt: r.createdAt };
+  if (r.kind) out.kind = r.kind;
   if (demo) out.demo = true;
   return out;
 }
@@ -432,11 +441,15 @@ export function toAgentInfo(t: TimelineAgent, recent: Activity[] = []): AgentInf
   if (t.shells?.length) a.shells = t.shells.map((j) => ({ ...j }));
   if (t.background) a.background = true;
   if (t.parts) a.parts = { ...t.parts };
+  if (t.post) a.post = t.post;
+  if (t.summon) a.summon = { ...t.summon };
   return a;
 }
 
 export function toRoomInfo(r: TimelineRoom): RoomInfo {
-  return { id: r.id, name: r.name, path: r.path, slot: r.slot, seed: r.seed, createdAt: r.createdAt };
+  const out: RoomInfo = { id: r.id, name: r.name, path: r.path, slot: r.slot, seed: r.seed, createdAt: r.createdAt };
+  if (r.kind) out.kind = r.kind;
+  return out;
 }
 
 export function toAccountInfo(a: TimelineAccount, at: number): AccountInfo {

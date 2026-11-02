@@ -118,6 +118,16 @@ export class Character {
   /** Render: próxima pipoca que pula do balde (epoch ms). */
   popcornAt = 0;
 
+  // chamado da gerente (AgentInfo.summon; sim.ts, planSummon)
+  /** `at` do último chamado já visto (cada chamado é encenado uma vez). */
+  summonAt = 0;
+  /** Chamado a encenar no próximo planejamento (o plano atual é interrompido antes). */
+  summonPending: { by: string; byName: string; text?: string; expires: number } | null = null;
+  /** Ouvindo a instrução de quem chamou (id da gerente), sentado/de pé na sala dela. */
+  listeningTo: string | null = null;
+  /** A gerente está na cabeceira (ou indo para lá) falando com quem chamou. */
+  briefing = false;
+
   constructor(info: AgentInfo, appearance: Appearance) {
     this.id = info.id;
     this.info = info;

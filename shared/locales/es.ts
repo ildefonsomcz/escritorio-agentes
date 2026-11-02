@@ -3274,4 +3274,15 @@ export const ES: Readonly<Record<string, string>> = {
   "Carimbo deixado na portaria: {0}": "Sello dejado en la recepción: {0}",
   "Entre no prédio ou chegue mais perto da porta para carimbar.": "Entra al edificio o acércate más a la puerta para sellar.",
   "O carimbo não foi deixado. Tente de novo.": "El sello no se dejó. Inténtalo de nuevo.",
+
+  // server/sources/cerebro/source.ts (chamado da gerente)
+  "Chamou o {0}: {1}": "Llamó a {0}: {1}",
+  "Chamou a {0}: {1}": "Llamó a {0}: {1}",
+  "Chamou o {0}": "Llamó a {0}",
+  "Chamou a {0}": "Llamó a {0}",
+
+  // client/src/world/sim/sim.ts (chamado da gerente)
+  "Ouvindo o {0}…": "Escuchando a {0}…",
+  "Ouvindo a {0}…": "Escuchando a {0}…",
+  "Tarefa para {0}": "Tarea para {0}",
 };

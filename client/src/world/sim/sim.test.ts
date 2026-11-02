@@ -764,3 +764,107 @@ describe('espera de shell', () => {
     expect(ana.pose).toBe('wait');
   });
 });
+
+describe('chamado da gerente (AgentInfo.summon)', () => {
+  const ROOMS: RoomInfo[] = [
+    { ...room('/agentes/Restaurante', 0), kind: 'restaurante' },
+    { ...room('/agentes/Diretoria', 1), kind: 'gerencia' },
+    room('/agentes/Fred', 2),
+  ];
+  const manu = agent('manu', '/agentes/Diretoria', 'working', { look: 'f' });
+  const scooby = agent('scooby', '/agentes/Restaurante', 'idle', { post: 'balcao', look: 'm' });
+  const fred = agent('fred', '/agentes/Fred', 'idle', { look: 'm' });
+  const at = (s: number) => T0 + s * 1000;
+  const summon = (text = 'Fechamento do dia', when = at(2)) => ({ by: 'manu', byName: 'Manu', text, at: when, until: when + 20_000 });
+  const live = (agents: AgentInfo[], rev: number, serverTime: number): OfficeSnapshot => ({ ...snap(ROOMS, agents, rev), serverTime });
+
+  function start() {
+    const sim = newSim();
+    const clock = { now: T0 };
+    sim.applySnapshot(live([manu, scooby, fred], 1, T0), clock.now);
+    run(sim, clock, 1);
+    return { sim, clock, m: sim.chars.get('manu')!, s: sim.chars.get('scooby')!, f: sim.chars.get('fred')! };
+  }
+
+  const roomOf = (sim: Sim, ch: Character) => sim.spots.get(ch.atSpot)?.areaId;
+
+  it('os chamados vão até a gerência (cada um num lugar), ouvem, e voltam ao posto; a gerente fala da cabeceira', () => {
+    const { sim, clock, m, s, f } = start();
+    const homeS = s.homeSpot;
+    const homeF = f.homeSpot;
+    expect(sim.spots.get(homeS)?.post).toBe('balcao');
+    sim.applySnapshot(live([manu, { ...scooby, status: 'working', summon: summon() }, { ...fred, status: 'working', summon: summon() }], 2, at(2)), clock.now);
+    run(sim, clock, 30, () => s.listeningTo === 'manu' && f.listeningTo === 'manu');
+    expect(s.listeningTo).toBe('manu');
+    expect(f.listeningTo).toBe('manu');
+    expect(roomOf(sim, s)).toBe('/agentes/Diretoria');
+    expect(roomOf(sim, f)).toBe('/agentes/Diretoria');
+    expect(s.atSpot).not.toBe(f.atSpot);
+    expect(sim.spots.get(s.atSpot)?.kind).toBe('listen');
+    expect(s.bubbleText).toBe('Ouvindo a Manu…');
+    expect(m.bubbleText).toBe('Fechamento do dia');
+    // a gerente levanta e fala de pé na cabeceira, virada para a mesa
+    run(sim, clock, 3);
+    expect(m.atSpot).toBeNull();
+    expect(m.pose).toBe('talk');
+    expect(m.dir).toBe('left');
+    // depois da instrução, cada um volta para o próprio lugar e trabalha
+    run(sim, clock, 40, () => s.atSpot === homeS && f.atSpot === homeF && m.atSpot === m.homeSpot);
+    expect(s.atSpot).toBe(homeS);
+    expect(f.atSpot).toBe(homeF);
+    expect(m.atSpot).toBe(m.homeSpot);
+    expect(s.listeningTo).toBeNull();
+    expect(m.briefing).toBe(false);
+    // as poltronas da reunião ficaram livres
+    for (const sp of sim.rooms.get('/agentes/Diretoria')!.layout.spots.filter((x) => x.kind === 'listen')) expect(sim.spots.isFree(sp.id, 'outro')).toBe(true);
+    run(sim, clock, 1);
+    expect(s.pose).not.toBe('walk');
+  });
+
+  it('o mesmo chamado não se repete; chamado vencido, da carga inicial ou sem a gerente não move ninguém', () => {
+    const { sim, clock, f } = start();
+    const home = f.homeSpot;
+    const sm = summon();
+    sim.applySnapshot(live([manu, scooby, { ...fred, status: 'working', summon: sm }], 2, at(2)), clock.now);
+    run(sim, clock, 60, () => f.listeningTo === 'manu');
+    run(sim, clock, 40, () => f.atSpot === home && !f.queue.length && !f.step);
+    expect(f.atSpot).toBe(home);
+    // o mesmo `at` relido: fica na mesa
+    sim.applySnapshot(live([manu, scooby, { ...fred, status: 'working', summon: sm }], 3, at(5)), clock.now);
+    run(sim, clock, 2);
+    expect(f.atSpot).toBe(home);
+    // vencido no relógio do servidor
+    sim.applySnapshot(live([manu, scooby, { ...fred, status: 'working', summon: summon('x', at(3)) }], 4, at(40)), clock.now);
+    run(sim, clock, 2);
+    expect(f.atSpot).toBe(home);
+    // sem a gerente no escritório: trabalha na mesa
+    sim.applySnapshot(live([scooby, { ...fred, status: 'working', summon: { ...summon('y', at(41)), by: 'ninguem' } }], 5, at(41)), clock.now);
+    run(sim, clock, 3);
+    expect(f.atSpot).toBe(home);
+    expect(f.pose).toBe('type');
+    // chamado que já estava no ar quando a página abriu: não encena
+    const sim2 = newSim();
+    const c2 = { now: T0 };
+    sim2.applySnapshot(live([manu, scooby, { ...fred, status: 'working', summon: summon() }], 1, at(2)), c2.now);
+    run(sim2, c2, 3);
+    const f2 = sim2.chars.get('fred')!;
+    expect(f2.atSpot).toBe(f2.homeSpot);
+    expect(f2.listeningTo).toBeNull();
+  });
+
+  it('sala que vira gerência (tipo trocado no banco) ganha a planta nova e a gerente senta na mesa executiva', () => {
+    const sim = newSim();
+    const clock = { now: T0 };
+    const before = ROOMS.map((r) => (r.id === '/agentes/Diretoria' ? { ...r, kind: 'sala' } : r));
+    sim.applySnapshot({ ...snap(before, [manu, scooby, fred]), serverTime: T0 }, clock.now);
+    run(sim, clock, 1);
+    const dir = sim.rooms.get('/agentes/Diretoria')!;
+    expect(dir.layout.spots.some((s) => s.kind === 'listen')).toBe(false);
+    sim.applySnapshot(live([manu, scooby, fred], 2, at(1)), clock.now);
+    expect(dir.layout.spots.some((s) => s.kind === 'listen')).toBe(true);
+    const m = sim.chars.get('manu')!;
+    run(sim, clock, 20, () => !!m.atSpot && m.atSpot === m.homeSpot);
+    expect(sim.spots.get(m.homeSpot)?.kind).toBe('desk');
+    expect(sim.spots.get(m.homeSpot)?.areaId).toBe('/agentes/Diretoria');
+  });
+});

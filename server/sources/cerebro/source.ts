@@ -6,8 +6,13 @@
 // execução); o que ele fez sai de cerebro.interacoes (o log normal, gravado no fim). Tudo vem de UMA chamada,
 // a RPC public.cerebro_escritorio_estado, repetida a cada CEREBRO_POLL_MS.
 //
+// Chamado da gerente: quando a gerente (sala do tipo 'gerencia', ou a Manu) delega uma tarefa, o n8n grava a execução
+// do agente chamado com gatilho "pedido da Manu". Ao vivo, a gerente mostra "Chamou o X: ..." e o agente chamado ganha
+// AgentInfo.summon: no escritório, ele vai até a sala dela, ouve a instrução e volta ao posto (client/src/world/sim).
+//
 // Sem dependências: fetch do Node. A chave (service_role/secret) fica só aqui no servidor.
 import { readFile } from 'node:fs/promises';
+import { tr } from '../../../shared/i18n';
 import type { Activity, ActivityKind, AgentStats, SourceInfo } from '../../../shared/types';
 import type { CerebroConfig } from '../../config';
 import { errMsg, log } from '../../log';
@@ -89,6 +94,18 @@ const SEEN_MAX = 5_000;
 const MAX_TEXT = 46;
 /** Colunas do núcleo do prédio no cliente (client/src/world/constants.ts, CORE_COLS). */
 const CORE_COLS = 2;
+/** Tipo de sala da gerente geral: quem está nela chama os outros agentes até lá. */
+export const TIPO_GERENCIA = 'gerencia';
+/** Slug da gerente geral (chama os agentes mesmo antes de a sala dela virar 'gerencia'). */
+const GERENTE_SLUG = 'manu';
+/** Por quanto tempo o chamado fica no snapshot (quem abrir a página nesse meio-tempo ainda vê o agente ir). */
+const SUMMON_MS = 20_000;
+/** Só chama quem começou há pouco (uma execução antiga lida agora não faz ninguém atravessar o prédio). */
+const SUMMON_FRESH_MS = 2 * 60_000;
+/** A gerente fica na mesa (trabalhando) enquanto passa a tarefa. */
+const BOSS_FLASH_MS = 30_000;
+/** Pedido, no chamado (o balão corta de novo). */
+const SUMMON_TEXT = 120;
 
 const CANAL_ICON: Record<string, string> = { telegram: '💬', whatsapp: '💬', web: '🌐', api: '🔗', cron: '⏰', email: '📧', outro: '⚙️' };
 
@@ -101,6 +118,41 @@ interface AgentState {
   flashUntil: number;
   stats: AgentStats;
   statsDay: string;
+}
+
+/** Texto para comparar sem diferenciar maiúsculas, acentos nem espaços repetidos. */
+export function norm(text: string | null | undefined): string {
+  return (text ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Quem pediu, num gatilho "pedido do/da X" (normalizado); undefined se não for um pedido. */
+export function requesterOf(gatilho: string | null | undefined): string | undefined {
+  const m = /^pedido d[oa]s? (.+)$/.exec(norm(gatilho));
+  return m ? m[1] : undefined;
+}
+
+/** O agente é a gerente geral (chama os colegas até a sala dela)? */
+export function isManager(a: CerebroAgente): boolean {
+  return tipoOf(a) === TIPO_GERENCIA || norm(a.slug) === GERENTE_SLUG;
+}
+
+/**
+ * Fixture (CEREBRO_FIXTURE): o que está no futuro ainda não aconteceu. Assim o arquivo de exemplo pode "agendar" um
+ * pedido da Manu alguns segundos depois de o servidor subir, e ele aparece ao vivo (o banco nunca devolve o futuro).
+ */
+export function fixtureAt(st: CerebroEstado, now: number): CerebroEstado {
+  const past = (iso: string | null | undefined) => !iso || !(Date.parse(iso) > now);
+  return {
+    ...st,
+    agora: new Date(now).toISOString(),
+    execucoes: (st.execucoes ?? []).filter((e) => past(e.iniciado_em)).map((e) => (past(e.finalizado_em) ? e : { ...e, finalizado_em: null, status: 'rodando' })),
+    interacoes: (st.interacoes ?? []).filter((i) => past(i.ocorrido_em)),
+  };
 }
 
 /** Corta um texto para o balão (com reticências). */
@@ -132,6 +184,11 @@ function zero(): AgentStats {
   return { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0, costUSD: 0 };
 }
 
+/** Tipo da sala de um agente, normalizado ('Gerência' -> 'gerencia'); padrão 'sala'. */
+export function tipoOf(a: CerebroAgente): string {
+  return norm(a.escritorio?.tipo) || 'sala';
+}
+
 /** Caminho (= id da sala no escritório) de um agente. */
 export function roomPathOf(a: CerebroAgente): string {
   const sala = a.escritorio?.sala?.trim() || `Sala ${a.nome}`;
@@ -140,19 +197,21 @@ export function roomPathOf(a: CerebroAgente): string {
 
 /**
  * Ordem de criação das salas (o servidor dá o slot pela ordem de chegada; no cliente, coluna = slot/2, par ao norte).
- * Restaurante primeiro (junto da entrada), depois as outras por `ordem`, e o co-work no meio do prédio.
+ * Restaurante primeiro (junto da entrada), depois as outras por `ordem` (a gerência, com `ordem` baixa, logo em
+ * seguida), e o co-work no meio do prédio, mas nunca à frente do restaurante nem da gerência.
  */
 export function orderAgents(agentes: readonly CerebroAgente[]): CerebroAgente[] {
   const rooms = new Map<string, { path: string; tipo: string; ordem: number; agents: CerebroAgente[] }>();
   for (const a of agentes) {
     const path = roomPathOf(a);
-    const r = rooms.get(path) ?? { path, tipo: a.escritorio?.tipo ?? 'sala', ordem: Number.POSITIVE_INFINITY, agents: [] };
+    const r = rooms.get(path) ?? { path, tipo: tipoOf(a), ordem: Number.POSITIVE_INFINITY, agents: [] };
     r.ordem = Math.min(r.ordem, a.escritorio?.ordem ?? 100);
-    if (a.escritorio?.tipo) r.tipo = a.escritorio.tipo;
+    if (a.escritorio?.tipo) r.tipo = tipoOf(a);
     r.agents.push(a);
     rooms.set(path, r);
   }
-  const all = [...rooms.values()].sort((x, y) => x.ordem - y.ordem || x.path.localeCompare(y.path));
+  const first = (r: { tipo: string }) => (r.tipo === 'restaurante' ? 0 : 1);
+  const all = [...rooms.values()].sort((x, y) => first(x) - first(y) || x.ordem - y.ordem || x.path.localeCompare(y.path));
   const cowork = all.filter((r) => r.tipo === 'cowork');
   const rest = all.filter((r) => r.tipo !== 'cowork');
   if (cowork.length) {
@@ -160,8 +219,8 @@ export function orderAgents(agentes: readonly CerebroAgente[]): CerebroAgente[] 
     const total = CORE_COLS + Math.ceil(all.length / 2);
     const col = Math.max(0, Math.floor((total - 1) / 2) - CORE_COLS);
     let at = col * 2;
-    // o restaurante fica sempre na primeira vaga: o co-work vai para o outro lado do corredor
-    if (at === 0 && rest[0]?.tipo === 'restaurante') at = 1;
+    // o restaurante e a gerência ficam junto da entrada: o co-work vai depois deles
+    while (at < rest.length && at < 2 && (rest[at].tipo === 'restaurante' || rest[at].tipo === TIPO_GERENCIA)) at++;
     rest.splice(Math.min(at, rest.length), 0, ...cowork);
   }
   return rest.flatMap((r) => r.agents.sort((x, y) => (x.escritorio?.posto === 'balcao' ? -1 : 0) - (y.escritorio?.posto === 'balcao' ? -1 : 0) || x.nome.localeCompare(y.nome)));
@@ -185,6 +244,10 @@ export class CerebroSource implements AgentSource {
   private agents = new Map<string, AgentState>();
   private seenExec = new Map<string, string>();
   private seenInter = new Set<number>();
+  /** Execuções que vieram de um pedido de colega ("pedido da Manu"): o canal 'api' delas não é lead no CRM. */
+  private pedidoExec = new Set<string>();
+  /** Execuções de pedido da gerente já tratadas (o chamado é encenado uma vez, e nunca as do boot). */
+  private summoned = new Set<string>();
   private lastAgora = 0;
   private timer: NodeJS.Timeout | undefined;
   private tick: NodeJS.Timeout | undefined;
@@ -243,7 +306,7 @@ export class CerebroSource implements AgentSource {
   }
 
   private async defaultFetch(since: Date): Promise<CerebroEstado> {
-    if (this.cfg.fixture) return JSON.parse(await readFile(this.cfg.fixture, 'utf8')) as CerebroEstado;
+    if (this.cfg.fixture) return fixtureAt(JSON.parse(await readFile(this.cfg.fixture, 'utf8')) as CerebroEstado, this.now());
     if (!this.cfg.url || !this.cfg.key) throw new Error('sem banco configurado');
     const key = this.cfg.key;
     const headers: Record<string, string> = { 'content-type': 'application/json', apikey: key, accept: 'application/json' };
@@ -293,6 +356,8 @@ export class CerebroSource implements AgentSource {
     this.lastAgora = Number.isFinite(agora) ? agora : this.now();
     this.syncAgents(st.agentes ?? []);
     const live = !boot;
+    // pedidos de colegas primeiro: o fim de um deles (canal 'api') pode chegar na mesma leitura que o início
+    for (const ex of st.execucoes ?? []) if (requesterOf(ex.gatilho) !== undefined) this.pedidoExec.add(ex.id);
     // interações primeiro (fecham execuções), na ordem em que aconteceram
     const inters = [...(st.interacoes ?? [])].sort((a, b) => a.id - b.id);
     for (const it of inters) this.onInteraction(it, live);
@@ -309,8 +374,13 @@ export class CerebroSource implements AgentSource {
       const cur = this.agents.get(row.slug);
       if (cur) {
         const moved = roomPathOf(cur.row) !== roomPathOf(row) || cur.row.nome !== row.nome || cur.row.escritorio?.posto !== row.escritorio?.posto;
+        const retyped = tipoOf(cur.row) !== tipoOf(row);
         cur.row = row;
-        if (!moved) continue;
+        if (!moved) {
+          // tipo novo (ex.: 'sala' -> 'gerencia'): a mesma sala ganha a planta do tipo novo
+          if (retyped) this.office.setRoomKind(cur.id, tipoOf(row));
+          continue;
+        }
         // mudou de sala, de nome ou de posto: sai e entra de novo
         this.office.closeMain(cur.id);
         this.agents.delete(row.slug);
@@ -328,7 +398,7 @@ export class CerebroSource implements AgentSource {
         status: 'idle',
         name: row.nome,
         look: esc.visual === 'f' ? 'f' : 'm',
-        roomKind: esc.tipo || 'sala',
+        roomKind: tipoOf(row),
         post: esc.posto,
       });
       const state: AgentState = { row, id, open: new Map(), openGatilho: new Map(), flashUntil: 0, stats: zero(), statsDay: dayOf(now) };
@@ -348,13 +418,20 @@ export class CerebroSource implements AgentSource {
     const started = Date.parse(ex.iniciado_em);
     const finished = ex.finalizado_em ? Date.parse(ex.finalizado_em) : undefined;
     const running = ex.status === 'rodando' && finished === undefined && this.now() - started < this.cfg.timeoutMs;
+    // chamado da gerente: ao vivo e recente (mesmo que tenha começado e terminado entre duas leituras)
+    const boss = this.managerOf(ex, a);
+    if (boss && !this.summoned.has(ex.id)) {
+      this.summoned.add(ex.id);
+      if (live && this.now() - started < SUMMON_FRESH_MS) this.summon(boss, a, ex, started);
+    }
     const prev = this.seenExec.get(ex.id);
     const key = running ? 'rodando' : 'fim';
     if (prev === key) return;
     this.seenExec.set(ex.id, key);
     if (running) {
       a.open.set(ex.id, started);
-      if (ex.gatilho) a.openGatilho.set(ex.id, ex.gatilho.toLowerCase());
+      // pedido de um colega (subfluxo sem fim registrado) fecha quando ele termina; o da gerente, só pelo próprio fim
+      if (ex.gatilho && !boss) a.openGatilho.set(ex.id, norm(ex.gatilho));
       if (prev === undefined) this.office.addActivity(a.id, this.startActivity(a, ex, started), true, { feed: live });
     } else {
       a.open.delete(ex.id);
@@ -364,13 +441,37 @@ export class CerebroSource implements AgentSource {
     }
   }
 
+  /** A gerente que fez este pedido ("pedido da Manu"), se o gatilho for dela e ela estiver no escritório. */
+  private managerOf(ex: CerebroExecucao, called: AgentState): AgentState | undefined {
+    const who = requesterOf(ex.gatilho);
+    if (!who) return undefined;
+    for (const other of this.agents.values()) {
+      if (other === called || !isManager(other.row)) continue;
+      if (norm(other.row.nome) === who || norm(other.row.slug) === who) return other;
+    }
+    return undefined;
+  }
+
+  /** A gerente chamou `called`: balão "Chamou o X" nela e o chamado (ir até a sala dela) no agente. */
+  private summon(boss: AgentState, called: AgentState, ex: CerebroExecucao, at: number): void {
+    const what = ex.resumo?.trim();
+    const fem = called.row.escritorio?.visual === 'f';
+    const nome = called.row.nome;
+    const text = what ? (fem ? tr('Chamou a {0}: {1}', [nome, what]) : tr('Chamou o {0}: {1}', [nome, what])) : fem ? tr('Chamou a {0}', [nome]) : tr('Chamou o {0}', [nome]);
+    const act: Activity = { id: `${boss.id}#chamou:${ex.id}`, kind: 'communicate', icon: '📣', text: fit(text), at };
+    if (text.length > MAX_TEXT) act.detail = fit(text, 300);
+    this.office.addActivity(boss.id, act, true, { feed: true });
+    boss.flashUntil = Math.max(boss.flashUntil, this.now() + BOSS_FLASH_MS);
+    this.office.summon(called.id, boss.id, what ? fit(what, SUMMON_TEXT) : undefined, SUMMON_MS, { live: true });
+  }
+
   private startActivity(a: AgentState, ex: CerebroExecucao, at: number): Activity {
     const canal = ex.canal ?? 'telegram';
     const rotina = ex.gatilho && ex.gatilho !== 'chat';
     const what = ex.resumo?.trim();
     let text: string;
     let kind: ActivityKind = 'prompt';
-    const pedido = /^pedido d[oa] /i.exec(ex.gatilho ?? '');
+    const pedido = requesterOf(ex.gatilho) !== undefined;
     if (pedido) {
       kind = 'communicate';
       text = `${ex.gatilho!.replace(/^pedido/i, 'Pedido')}${what ? `: ${what}` : ''}`;
@@ -379,7 +480,7 @@ export class CerebroSource implements AgentSource {
       text = what ? `Rotina: ${what}` : `Rotina: ${ex.gatilho}`;
     } else if (canal === 'web') text = what ? `Site: ${what}` : 'Atendendo no site';
     else text = what ? what : 'Recebeu uma mensagem';
-    const icon = /^pedido d[oa] /i.test(ex.gatilho ?? '') ? '🤝' : rotina ? '⏰' : (CANAL_ICON[canal] ?? '💬');
+    const icon = pedido ? '🤝' : rotina ? '⏰' : (CANAL_ICON[canal] ?? '💬');
     const act: Activity = { id: `${a.id}#e:${ex.id}`, kind, icon, text: fit(text), at };
     if (what && what.length > MAX_TEXT) act.detail = what;
     return act;
@@ -394,13 +495,15 @@ export class CerebroSource implements AgentSource {
     const began = at - Math.max(0, it.duracao_ms ?? 0);
     const exec = it.n8n_execution_id ?? undefined;
     const hadStart = exec !== undefined && this.seenExec.has(exec);
+    // fim de um pedido de colega: o canal 'api' é o do pedido, não um lead enviado ao CRM
+    const lead = it.canal === 'api' && !(exec !== undefined && this.pedidoExec.has(exec));
     if (exec) {
       a.open.delete(exec);
       a.openGatilho.delete(exec);
       this.seenExec.set(exec, 'fim');
     }
     // pedidos que este agente fez a colegas (subfluxos sem log de fim, ex.: "pedido do Salsicha") terminam com ele
-    const nome = a.row.nome.toLowerCase();
+    const nome = norm(a.row.nome);
     for (const other of this.agents.values()) {
       if (other === a) continue;
       for (const [id, g] of other.openGatilho) {
@@ -429,7 +532,7 @@ export class CerebroSource implements AgentSource {
       if (it.erro) final.detail = it.erro;
     } else if (it.status === 'ignorado') {
       final = { id: `${a.id}#i:${it.id}:f`, kind: 'other', icon: '🙈', text: fit(it.entrada ? `Ignorou: ${it.entrada}` : 'Ignorou'), at };
-    } else if (it.canal === 'api') {
+    } else if (lead) {
       final = { id: `${a.id}#i:${it.id}:f`, kind: 'communicate', icon: '📤', text: 'Enviou o lead para o CRM', at };
     } else {
       final = { id: `${a.id}#i:${it.id}:f`, kind: 'done', icon: '✅', text: took ? `Respondeu em ${took}` : 'Respondeu', at };
@@ -443,7 +546,7 @@ export class CerebroSource implements AgentSource {
     if (it.status === 'erro') {
       this.office.roomEffect(a.id, 'alarm', fit(`Erro no ${a.row.nome}`, 30), ALARM_MS);
       this.office.externalNotice(a.id, 'alert', `⚠️ ${a.row.nome} teve um erro${it.erro ? `: ${fit(it.erro, 80)}` : ''}`);
-    } else if (it.canal === 'api' && it.status === 'ok') {
+    } else if (lead && it.status === 'ok') {
       this.office.roomEffect(a.id, 'party', 'Lead novo no CRM!', PARTY_MS);
       this.office.externalNotice(a.id, 'success', `🎉 ${a.row.nome} enviou um lead para o CRM`);
     }
@@ -515,6 +618,8 @@ export class CerebroSource implements AgentSource {
       const keep = [...this.seenInter].sort((x, y) => y - x).slice(0, SEEN_MAX / 2);
       this.seenInter = new Set(keep);
     }
+    if (this.pedidoExec.size > SEEN_MAX) this.pedidoExec = new Set([...this.pedidoExec].slice(-SEEN_MAX / 2));
+    if (this.summoned.size > SEEN_MAX) this.summoned = new Set([...this.summoned].slice(-SEEN_MAX / 2));
     if (this.seenExec.size > SEEN_MAX) {
       const entries = [...this.seenExec.entries()].slice(-SEEN_MAX / 2);
       this.seenExec = new Map(entries);
