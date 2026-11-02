@@ -12,6 +12,12 @@ do meio (0.**3**.0).
 
 ### Adicionado
 
+- **A Manu enxerga o escritório.** A página aberta manda ao servidor, a cada 15 s, onde cada agente está e o que faz na
+  tela (jogando videogame com o Scooby, papo na copa, cochilando no lounge, no banheiro, trabalhando…), em
+  `POST /api/cena` (`client/src/world/scene-report.ts`, `server/http/cena.ts`). O servidor guarda no Cérebro
+  (`cerebro.escritorio_cena`) e a ferramenta "Ver o escritorio agora" da Manu lê pela RPC `manu_escritorio_agora`,
+  junto com o trabalho real. Sem nenhuma tela aberta, a Manu responde pelo trabalho registrado e pelas regras do
+  escritório (à toa há mais de 10 min = descansando no lounge).
 - **Gerência: a sala da gerente geral dos agentes do n8n.** Um tipo de cômodo novo, `gerencia` (em
   `config.escritorio.tipo`), com cara de diretoria: piso de madeira, lambri, tapetes vinho e azul-marinho, mesa
   executiva escura com gaveteiros e poltrona de chefe, mesa de reunião com poltronas, estante, plantas e a placa com o

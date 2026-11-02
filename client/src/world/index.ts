@@ -10,6 +10,7 @@ import { createDebug, type WorldDebug } from './debug';
 import { BUILDING_H, COL_W } from './constants';
 import { RECEPTION_ID } from './layout/core';
 import { inRect } from './layout/geometry';
+import { describeScene } from './scene-report';
 import { attachInput, type Hit } from './input';
 import type { AgentInfo } from '../../../shared/types';
 import { rebaseSnapshot } from './playback';
@@ -357,6 +358,29 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore, o: Cr
   resize();
   raf = requestAnimationFrame(loop);
 
+  // ------------------------------------------------------------------ cena para a Manu
+  // A vida social só existe no navegador: a página aberta (ao vivo, visível) manda o retrato da cena ao servidor, que o
+  // guarda no Cérebro para a Manu responder "o que o Salsicha está fazendo com o Scooby?" (world/scene-report.ts).
+  const sendScene = () => {
+    if (visitMode || playback || suspended || document.hidden || !sim.initialized || typeof fetch !== 'function') return;
+    let cena;
+    try {
+      cena = describeScene(sim, Date.now());
+    } catch (err) {
+      console.error('[mundo] cena para a Manu', err);
+      return;
+    }
+    void fetch('/api/cena', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ cena }),
+      signal: abort.signal,
+    }).catch(() => undefined);
+  };
+  const sceneTimer = setInterval(sendScene, 15_000);
+  const sceneFirst = setTimeout(sendScene, 4_000);
+
   // ------------------------------------------------------------------ depuração
 
   const markMoved = () => (userMoved = true);
@@ -466,6 +490,8 @@ export function createWorld(canvas: HTMLCanvasElement, store: OfficeStore, o: Cr
     },
     destroy: () => {
       cancelAnimationFrame(raf);
+      clearInterval(sceneTimer);
+      clearTimeout(sceneFirst);
       abort.abort();
       offSnapshot();
       detachInput();

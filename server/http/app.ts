@@ -1,4 +1,5 @@
 // Rotas da API (/api/*). Respostas JSON; rotas desconhecidas -> 404 JSON.
+import type { CenaStore } from './cena';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { NAME_MAX, parseAppearanceParts, parseCharacterName, parseSeed } from '../../shared/appearance';
 import type { AccessInfo, AgentInfo, ModSummary, OfficeSnapshot, SourceInfo, UpdateStatus } from '../../shared/types';
@@ -57,6 +58,8 @@ export interface ApiDeps {
    * Ausente = desligado (sem HABBLAUD_PTY=1, Docker, sem node-pty ou sem bind local).
    */
   pty?: (req: IncomingMessage, res: ServerResponse, path: string) => void;
+  /** Cena do escritório para a Manu (GET/POST /api/cena; http/cena.ts). Ausente = rota desconhecida. */
+  cena?: CenaStore;
   /**
    * Fonte do Codex ao vivo: recebe os eventos dos hooks do Codex (POST /api/codex/events, server/codex/http.ts). Sem
    * ela a rota responde {ok: false}. Só com Host local e, fora do Docker, conexão pelo loopback (os eventos só observam:
@@ -348,6 +351,10 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         req.resume();
         sendJson(res, 403, { error: { code: 'local_only', message: tr('o Habblaud World só é usado pelo próprio computador (http://localhost)') } });
       } else deps.world(req, res, url);
+      return true;
+    }
+    if (path === '/api/cena' && deps.cena) {
+      deps.cena.handle(req, res, (r) => readJson(r, 64 * 1024), sendJson).catch((err) => fail(res, err));
       return true;
     }
     if (path === '/api/stream') {
